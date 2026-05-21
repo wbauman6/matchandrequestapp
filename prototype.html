@@ -1,0 +1,3122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#ffffff">
+<title>Walter Bauman Jewelers — Inventory & Request Management</title>
+<style>
+  /* ========== WALTER BAUMAN DESIGN SYSTEM ========== */
+  :root {
+    /* Brand Colors from the actual website */
+    --wb-gold: #c9a96e;
+    --wb-gold-light: #d4b87e;
+    --wb-gold-dim: rgba(201,169,110,0.12);
+    --wb-pink: #d4a5a5;
+    --wb-pink-light: #e8c4c4;
+    --wb-black: #1a1a1a;
+    --wb-charcoal: #333333;
+    --wb-gray: #666666;
+    --wb-gray-light: #999999;
+    --wb-silver: #c0c0c0;
+    --wb-cream: #f8f6f3;
+    --wb-white: #ffffff;
+    --wb-off-white: #faf9f7;
+    --wb-border: #e8e6e3;
+    --wb-border-light: #f0eeeb;
+    
+    /* Semantic mapping */
+    --bg: var(--wb-white);
+    --surface: var(--wb-white);
+    --surface-elevated: var(--wb-off-white);
+    --surface-hover: var(--wb-cream);
+    --border: var(--wb-border);
+    --border-hover: var(--wb-silver);
+    --accent: var(--wb-gold);
+    --accent-hover: var(--wb-gold-light);
+    --accent-dim: var(--wb-gold-dim);
+    --text: var(--wb-black);
+    --text-secondary: var(--wb-charcoal);
+    --text-tertiary: var(--wb-gray);
+    --text-muted: var(--wb-gray-light);
+    --success: #5a8a6a;
+    --success-light: rgba(90,138,106,0.1);
+    --danger: #b85450;
+    --danger-light: rgba(184,84,80,0.1);
+    --warning: var(--wb-gold);
+    
+    --shadow-sm: 0 1px 3px rgba(26,26,26,0.04);
+    --shadow: 0 4px 20px rgba(26,26,26,0.06);
+    --shadow-lg: 0 12px 40px rgba(26,26,26,0.08);
+    --radius-sm: 4px;
+    --radius: 8px;
+    --radius-lg: 12px;
+    
+    --font-serif: 'Cormorant Garamond', 'Playfair Display', Georgia, serif;
+    --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-mono: 'SF Mono', Menlo, monospace;
+    
+    --header-height: 72px;
+    --sidebar-width: 240px;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  
+  html { scroll-behavior: smooth; }
+  
+  body {
+    font-family: var(--font-sans);
+    background: var(--bg);
+    color: var(--text);
+    height: 100vh;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+    font-size: 13px;
+    letter-spacing: 0.01em;
+  }
+
+  /* Import fonts */
+  @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Inter:wght@300;400;500;600&display=swap');
+
+  ::-webkit-scrollbar { width: 4px; height: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--wb-border); border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--wb-silver); }
+
+  ::selection { background: var(--wb-gold-dim); color: var(--wb-black); }
+
+  /* ========== TOP BAR (like website header) ========== */
+  .site-header {
+    height: var(--header-height);
+    background: var(--wb-white);
+    border-bottom: 1px solid var(--wb-border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 40px;
+    position: relative;
+    z-index: 100;
+  }
+  
+  .site-header-left {
+    display: flex;
+    align-items: center;
+    gap: 32px;
+  }
+
+  .logo-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-decoration: none;
+    cursor: pointer;
+  }
+  
+  .logo-wrap img {
+    height: 48px;
+    width: auto;
+    object-fit: contain;
+    filter: grayscale(100%) contrast(1.2);
+    transition: filter 0.3s ease;
+  }
+  
+  .logo-wrap:hover img {
+    filter: grayscale(0%) contrast(1);
+  }
+
+  .logo-subtitle {
+    font-family: var(--font-serif);
+    font-size: 10px;
+    font-style: italic;
+    color: var(--wb-gray);
+    letter-spacing: 1.5px;
+    margin-top: 2px;
+  }
+
+  .top-nav {
+    display: flex;
+    align-items: center;
+    gap: 28px;
+  }
+  
+  .top-nav a {
+    font-family: var(--font-sans);
+    font-size: 11px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--wb-charcoal);
+    text-decoration: none;
+    padding: 4px 0;
+    position: relative;
+    transition: color 0.2s ease;
+    cursor: pointer;
+    border: none;
+    background: none;
+  }
+  
+  .top-nav a::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 0;
+    height: 1px;
+    background: var(--wb-gold);
+    transition: width 0.3s ease;
+  }
+  
+  .top-nav a:hover,
+  .top-nav a.active {
+    color: var(--wb-black);
+  }
+  
+  .top-nav a:hover::after,
+  .top-nav a.active::after {
+    width: 100%;
+  }
+
+  .site-header-right {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .header-action {
+    font-size: 11px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--wb-gray);
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 6px 12px;
+    transition: color 0.2s ease;
+  }
+  
+  .header-action:hover { color: var(--wb-black); }
+
+  .header-action.gold-btn {
+    background: var(--wb-gold);
+    color: var(--wb-white);
+    padding: 8px 18px;
+    border-radius: 2px;
+    font-weight: 600;
+    letter-spacing: 1.5px;
+    transition: background 0.2s ease, transform 0.1s ease;
+  }
+  
+  .header-action.gold-btn:hover {
+    background: var(--wb-gold-light);
+    color: var(--wb-white);
+    transform: translateY(-1px);
+  }
+
+  /* ========== LAYOUT ========== */
+  .app {
+    display: flex;
+    height: calc(100vh - var(--header-height));
+    overflow: hidden;
+  }
+
+  /* Sidebar */
+  .sidebar {
+    width: var(--sidebar-width);
+    background: var(--wb-off-white);
+    border-right: 1px solid var(--wb-border);
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+    overflow-y: auto;
+  }
+
+  .sidebar-section {
+    padding: 20px 24px;
+    border-bottom: 1px solid var(--wb-border-light);
+  }
+  
+  .sidebar-section:last-child { border-bottom: none; }
+
+  .sidebar-label {
+    font-size: 9px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: var(--wb-gray-light);
+    margin-bottom: 12px;
+  }
+
+  .sidebar-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border-radius: var(--radius-sm);
+    color: var(--wb-gray);
+    font-size: 13px;
+    font-weight: 400;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    margin-bottom: 2px;
+    position: relative;
+  }
+  
+  .sidebar-item:hover {
+    background: var(--wb-white);
+    color: var(--wb-black);
+  }
+  
+  .sidebar-item.active {
+    background: var(--wb-white);
+    color: var(--wb-black);
+    font-weight: 500;
+  }
+  
+  .sidebar-item.active::before {
+    content: '';
+    position: absolute;
+    left: -12px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 3px;
+    height: 20px;
+    background: var(--wb-gold);
+    border-radius: 0 2px 2px 0;
+  }
+
+  .sidebar-item svg {
+    width: 16px;
+    height: 16px;
+    stroke-width: 1.5;
+    flex-shrink: 0;
+    color: var(--wb-gray-light);
+    transition: color 0.15s ease;
+  }
+  
+  .sidebar-item:hover svg,
+  .sidebar-item.active svg {
+    color: var(--wb-gold);
+  }
+
+  .sidebar-badge {
+    margin-left: auto;
+    background: var(--wb-gold);
+    color: var(--wb-white);
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 20px;
+    min-width: 20px;
+    text-align: center;
+  }
+
+  .mini-profile {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: auto;
+    padding: 16px 24px;
+    border-top: 1px solid var(--wb-border-light);
+  }
+  
+  .mini-avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: var(--wb-cream);
+    border: 1px solid var(--wb-border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--font-serif);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--wb-gold);
+  }
+  
+  .mini-info {
+    flex: 1;
+    min-width: 0;
+  }
+  
+  .mini-name {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--wb-black);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  
+  .mini-role {
+    font-size: 10px;
+    color: var(--wb-gray-light);
+    letter-spacing: 0.5px;
+  }
+
+  /* Main */
+  .main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    min-width: 0;
+    background: var(--wb-white);
+  }
+
+  /* Sub-header */
+  .sub-header {
+    padding: 24px 40px 16px;
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 20px;
+    flex-wrap: wrap;
+    border-bottom: 1px solid var(--wb-border-light);
+  }
+  
+  .page-title-group h1 {
+    font-family: var(--font-serif);
+    font-size: 28px;
+    font-weight: 600;
+    color: var(--wb-black);
+    letter-spacing: -0.5px;
+    line-height: 1.2;
+  }
+  
+  .page-title-group p {
+    font-size: 13px;
+    color: var(--wb-gray);
+    margin-top: 4px;
+    font-weight: 400;
+  }
+
+  .sub-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  /* Search */
+  .wb-search {
+    position: relative;
+    width: 280px;
+  }
+  
+  .wb-search svg {
+    position: absolute;
+    left: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--wb-gray-light);
+    width: 14px;
+    height: 14px;
+    pointer-events: none;
+  }
+  
+  .wb-search input {
+    width: 100%;
+    height: 38px;
+    background: var(--wb-off-white);
+    border: 1px solid var(--wb-border);
+    border-radius: var(--radius-sm);
+    padding: 0 12px 0 36px;
+    color: var(--wb-black);
+    font-family: var(--font-sans);
+    font-size: 13px;
+    outline: none;
+    transition: all 0.2s ease;
+  }
+  
+  .wb-search input:focus {
+    border-color: var(--wb-gold);
+    background: var(--wb-white);
+    box-shadow: 0 0 0 3px var(--wb-gold-dim);
+  }
+  
+  .wb-search input::placeholder {
+    color: var(--wb-gray-light);
+  }
+
+  /* Buttons */
+  .wb-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    height: 38px;
+    padding: 0 20px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--wb-border);
+    background: var(--wb-white);
+    color: var(--wb-charcoal);
+    font-family: var(--font-sans);
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 0.5px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.15s ease;
+  }
+  
+  .wb-btn:hover {
+    border-color: var(--wb-silver);
+    background: var(--wb-off-white);
+    color: var(--wb-black);
+  }
+  
+  .wb-btn-primary {
+    background: var(--wb-black);
+    color: var(--wb-white);
+    border-color: var(--wb-black);
+    font-weight: 500;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    font-size: 11px;
+  }
+  
+  .wb-btn-primary:hover {
+    background: var(--wb-charcoal);
+    border-color: var(--wb-charcoal);
+    transform: translateY(-1px);
+    box-shadow: var(--shadow);
+  }
+  
+  .wb-btn-ghost {
+    background: transparent;
+    border-color: transparent;
+  }
+  
+  .wb-btn-ghost:hover {
+    background: var(--wb-off-white);
+    border-color: var(--wb-border);
+  }
+  
+  .wb-btn-danger {
+    color: var(--danger);
+    border-color: var(--danger-light);
+  }
+  
+  .wb-btn-danger:hover {
+    background: var(--danger-light);
+    border-color: var(--danger);
+  }
+  
+  .wb-btn-sm {
+    height: 32px;
+    padding: 0 14px;
+    font-size: 11px;
+  }
+
+  /* Content */
+  .content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 24px 40px 40px;
+  }
+
+  .page { display: none; }
+  .page.active { display: block; animation: fadeIn 0.3s ease; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+  /* Filters */
+  .filter-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 24px;
+    flex-wrap: wrap;
+  }
+  
+  .filter-pill {
+    padding: 6px 14px;
+    border-radius: 20px;
+    border: 1px solid var(--wb-border);
+    background: var(--wb-white);
+    color: var(--wb-gray);
+    font-size: 12px;
+    font-weight: 400;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    letter-spacing: 0.3px;
+  }
+  
+  .filter-pill:hover,
+  .filter-pill.active {
+    border-color: var(--wb-gold);
+    color: var(--wb-black);
+    background: var(--wb-gold-dim);
+  }
+
+  /* Cards */
+  .card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    gap: 20px;
+  }
+  
+  .card {
+    background: var(--wb-white);
+    border: 1px solid var(--wb-border);
+    border-radius: var(--radius-lg);
+    padding: 24px;
+    transition: all 0.2s ease;
+    position: relative;
+  }
+  
+  .card:hover {
+    border-color: var(--wb-silver);
+    box-shadow: var(--shadow);
+    transform: translateY(-1px);
+  }
+  
+  .card.pinned {
+    border-left: 3px solid var(--wb-gold);
+  }
+  
+  .card.fulfilled {
+    opacity: 0.6;
+  }
+
+  .card-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+  
+  .card-name {
+    font-family: var(--font-serif);
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--wb-black);
+    letter-spacing: -0.3px;
+  }
+  
+  .card-meta {
+    font-size: 12px;
+    color: var(--wb-gray);
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  
+  .card-body {
+    font-size: 13px;
+    color: var(--wb-gray);
+    line-height: 1.6;
+    margin-bottom: 16px;
+  }
+
+  .card-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-top: 16px;
+    border-top: 1px solid var(--wb-border-light);
+  }
+
+  /* Status & Priority */
+  .wb-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    padding: 4px 10px;
+    border-radius: var(--radius-sm);
+  }
+  
+  .wb-status::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+  }
+  
+  .wb-status-active { background: var(--success-light); color: var(--success); }
+  .wb-status-active::before { background: var(--success); }
+  .wb-status-pending { background: rgba(201,169,110,0.1); color: var(--wb-gold); }
+  .wb-status-pending::before { background: var(--wb-gold); }
+  .wb-status-fulfilled { background: var(--wb-gold-dim); color: var(--wb-gold); }
+  .wb-status-fulfilled::before { background: var(--wb-gold); }
+  .wb-status-archived { background: var(--wb-off-white); color: var(--wb-gray-light); }
+  .wb-status-archived::before { background: var(--wb-gray-light); }
+
+  .wb-priority {
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    padding: 3px 8px;
+    border-radius: 2px;
+  }
+  
+  .wb-priority-urgent { background: var(--danger-light); color: var(--danger); }
+  .wb-priority-high { background: rgba(201,169,110,0.15); color: var(--wb-gold); }
+  .wb-priority-medium { background: var(--wb-off-white); color: var(--wb-gray); }
+  .wb-priority-low { background: transparent; color: var(--wb-gray-light); border: 1px solid var(--wb-border); }
+
+  /* Tags */
+  .wb-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  
+  .wb-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 12px;
+    background: var(--wb-off-white);
+    border: 1px solid var(--wb-border);
+    border-radius: 20px;
+    font-size: 11px;
+    color: var(--wb-gray);
+    font-weight: 400;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    letter-spacing: 0.3px;
+  }
+  
+  .wb-tag:hover {
+    background: var(--wb-gold-dim);
+    border-color: var(--wb-gold);
+    color: var(--wb-black);
+  }
+  
+  .wb-tag .remove {
+    cursor: pointer;
+    opacity: 0.5;
+    font-size: 14px;
+    line-height: 1;
+    margin-left: 2px;
+  }
+  
+  .wb-tag .remove:hover { opacity: 1; }
+
+  /* Tables */
+  .wb-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+  
+  .wb-table th {
+    text-align: left;
+    padding: 12px 20px;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--wb-gray-light);
+    background: var(--wb-off-white);
+    border-bottom: 1px solid var(--wb-border);
+    white-space: nowrap;
+  }
+  
+  .wb-table td {
+    padding: 16px 20px;
+    font-size: 13px;
+    color: var(--wb-gray);
+    border-bottom: 1px solid var(--wb-border-light);
+    transition: background 0.15s ease;
+  }
+  
+  .wb-table tr:hover td {
+    background: var(--wb-off-white);
+    color: var(--wb-black);
+  }
+  
+  .wb-table .cell-title {
+    font-family: var(--font-serif);
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--wb-black);
+  }
+  
+  .wb-table .cell-sub {
+    font-size: 12px;
+    color: var(--wb-gray-light);
+    margin-top: 2px;
+  }
+
+  /* Stats */
+  .stats-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 20px;
+    margin-bottom: 32px;
+  }
+  
+  .stat-box {
+    background: var(--wb-white);
+    border: 1px solid var(--wb-border);
+    border-radius: var(--radius-lg);
+    padding: 24px;
+    transition: all 0.2s ease;
+  }
+  
+  .stat-box:hover {
+    border-color: var(--wb-silver);
+    box-shadow: var(--shadow-sm);
+  }
+  
+  .stat-value {
+    font-family: var(--font-serif);
+    font-size: 36px;
+    font-weight: 600;
+    color: var(--wb-black);
+    line-height: 1;
+    margin-bottom: 6px;
+  }
+  
+  .stat-label {
+    font-size: 11px;
+    color: var(--wb-gray);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    font-weight: 500;
+  }
+  
+  .stat-change {
+    font-size: 11px;
+    font-weight: 500;
+    margin-top: 8px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  
+  .stat-change.up { color: var(--success); }
+  .stat-change.down { color: var(--danger); }
+
+  /* Charts */
+  .chart-box {
+    background: var(--wb-white);
+    border: 1px solid var(--wb-border);
+    border-radius: var(--radius-lg);
+    padding: 24px;
+  }
+  
+  .chart-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 20px;
+  }
+  
+  .chart-title {
+    font-family: var(--font-serif);
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--wb-black);
+  }
+
+  /* Notifications / Matches */
+  .match-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  
+  .match-item {
+    display: flex;
+    gap: 16px;
+    background: var(--wb-white);
+    border: 1px solid var(--wb-border);
+    border-radius: var(--radius-lg);
+    padding: 20px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+  
+  .match-item:hover {
+    border-color: var(--wb-gold);
+    box-shadow: var(--shadow-sm);
+    transform: translateX(4px);
+  }
+  
+  .match-item.unread {
+    border-left: 3px solid var(--wb-gold);
+    background: var(--wb-off-white);
+  }
+  
+  .match-dot {
+    width: 8px;
+    height: 8px;
+    background: var(--wb-gold);
+    border-radius: 50%;
+    flex-shrink: 0;
+    margin-top: 4px;
+  }
+  
+  .match-dot.read { background: var(--wb-border); }
+  
+  .match-content { flex: 1; min-width: 0; }
+  
+  .match-title {
+    font-family: var(--font-serif);
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--wb-black);
+    margin-bottom: 4px;
+  }
+  
+  .match-sub {
+    font-size: 12px;
+    color: var(--wb-gray);
+    margin-bottom: 8px;
+  }
+  
+  .match-tags {
+    display: flex;
+    gap: 6px;
+    margin-top: 8px;
+    flex-wrap: wrap;
+  }
+  
+  .match-tag {
+    padding: 3px 10px;
+    background: var(--wb-gold-dim);
+    border: 1px solid rgba(201,169,110,0.2);
+    border-radius: 20px;
+    font-size: 10px;
+    color: var(--wb-gold);
+    font-weight: 500;
+    letter-spacing: 0.5px;
+  }
+  
+  .match-score {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 3px 10px;
+    border-radius: 20px;
+  }
+  
+  .match-score.high { background: var(--success-light); color: var(--success); }
+  .match-score.med { background: var(--wb-gold-dim); color: var(--wb-gold); }
+  .match-score.low { background: var(--wb-off-white); color: var(--wb-gray-light); }
+
+  .match-time {
+    font-size: 11px;
+    color: var(--wb-gray-light);
+    white-space: nowrap;
+    font-family: var(--font-mono);
+  }
+
+  /* Settings */
+  .settings-layout {
+    display: grid;
+    grid-template-columns: 280px 1fr;
+    gap: 32px;
+    align-items: start;
+  }
+  
+  .settings-nav {
+    position: sticky;
+    top: 24px;
+  }
+  
+  .settings-nav-item {
+    padding: 10px 16px;
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+    color: var(--wb-gray);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    margin-bottom: 2px;
+  }
+  
+  .settings-nav-item:hover,
+  .settings-nav-item.active {
+    background: var(--wb-off-white);
+    color: var(--wb-black);
+    font-weight: 500;
+  }
+  
+  .settings-nav-item.active {
+    border-left: 3px solid var(--wb-gold);
+    padding-left: 13px;
+  }
+
+  .settings-panel {
+    background: var(--wb-white);
+    border: 1px solid var(--wb-border);
+    border-radius: var(--radius-lg);
+    padding: 32px;
+  }
+  
+  .settings-panel h3 {
+    font-family: var(--font-serif);
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--wb-black);
+    margin-bottom: 24px;
+  }
+  
+  .setting-line {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 0;
+    border-bottom: 1px solid var(--wb-border-light);
+    gap: 20px;
+  }
+  
+  .setting-line:last-child { border-bottom: none; }
+  
+  .setting-info h4 {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--wb-black);
+    margin-bottom: 4px;
+  }
+  
+  .setting-info p {
+    font-size: 12px;
+    color: var(--wb-gray);
+  }
+
+  /* Color Wheel */
+  .wheel-area {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+    padding: 20px 0;
+  }
+  
+  .wheel-canvas-wrap {
+    position: relative;
+    width: 200px;
+    height: 200px;
+    border-radius: 50%;
+    overflow: hidden;
+    border: 2px solid var(--wb-border);
+    cursor: crosshair;
+    box-shadow: var(--shadow-sm);
+  }
+  
+  .wheel-canvas-wrap canvas {
+    display: block;
+    width: 200px;
+    height: 200px;
+  }
+  
+  .wheel-cursor {
+    position: absolute;
+    width: 14px;
+    height: 14px;
+    border: 2px solid var(--wb-white);
+    border-radius: 50%;
+    box-shadow: 0 0 0 1px rgba(0,0,0,0.3), 0 2px 6px rgba(0,0,0,0.2);
+    pointer-events: none;
+    transform: translate(-50%, -50%);
+    transition: none;
+  }
+
+  /* Modals */
+  .modal-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(26,26,26,0.4);
+    backdrop-filter: blur(6px);
+    z-index: 200;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+  }
+  
+  .modal-overlay.open {
+    display: flex;
+    opacity: 1;
+  }
+  
+  .modal-box {
+    background: var(--wb-white);
+    border: 1px solid var(--wb-border);
+    border-radius: var(--radius-lg);
+    width: 520px;
+    max-width: 100%;
+    max-height: 90vh;
+    overflow-y: auto;
+    box-shadow: var(--shadow-lg);
+    transform: scale(0.97) translateY(8px);
+    transition: transform 0.25s ease;
+  }
+  
+  .modal-overlay.open .modal-box {
+    transform: scale(1) translateY(0);
+  }
+  
+  .modal-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 24px 24px 0;
+  }
+  
+  .modal-head h2 {
+    font-family: var(--font-serif);
+    font-size: 22px;
+    font-weight: 600;
+    color: var(--wb-black);
+  }
+  
+  .modal-close {
+    width: 32px;
+    height: 32px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--wb-border);
+    background: var(--wb-white);
+    color: var(--wb-gray);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    line-height: 1;
+    transition: all 0.15s ease;
+  }
+  
+  .modal-close:hover {
+    background: var(--wb-off-white);
+    color: var(--wb-black);
+    border-color: var(--wb-silver);
+  }
+  
+  .modal-body { padding: 20px 24px; }
+  .modal-foot {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    padding: 0 24px 24px;
+  }
+
+  /* Form */
+  .wb-form-group { margin-bottom: 20px; }
+  
+  .wb-form-label {
+    display: block;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--wb-gray);
+    margin-bottom: 8px;
+  }
+  
+  .wb-form-input {
+    width: 100%;
+    height: 42px;
+    background: var(--wb-off-white);
+    border: 1px solid var(--wb-border);
+    border-radius: var(--radius-sm);
+    padding: 0 14px;
+    color: var(--wb-black);
+    font-family: var(--font-sans);
+    font-size: 13px;
+    outline: none;
+    transition: all 0.2s ease;
+  }
+  
+  .wb-form-input:focus {
+    border-color: var(--wb-gold);
+    background: var(--wb-white);
+    box-shadow: 0 0 0 3px var(--wb-gold-dim);
+  }
+  
+  .wb-form-input::placeholder { color: var(--wb-gray-light); }
+  
+  textarea.wb-form-input {
+    height: auto;
+    min-height: 80px;
+    padding: 12px 14px;
+    resize: vertical;
+  }
+  
+  select.wb-form-input {
+    cursor: pointer;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none'%3E%3Cpath d='M1 1L5 5L9 1' stroke='%23999' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    padding-right: 32px;
+  }
+  
+  .wb-form-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+
+  .tag-input-area {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    background: var(--wb-off-white);
+    border: 1px solid var(--wb-border);
+    border-radius: var(--radius-sm);
+    padding: 8px;
+    min-height: 46px;
+    cursor: text;
+    transition: all 0.2s ease;
+  }
+  
+  .tag-input-area:focus-within {
+    border-color: var(--wb-gold);
+    background: var(--wb-white);
+    box-shadow: 0 0 0 3px var(--wb-gold-dim);
+  }
+  
+  .tag-input-area input {
+    border: none;
+    background: transparent;
+    color: var(--wb-black);
+    font-family: inherit;
+    font-size: 13px;
+    outline: none;
+    flex: 1;
+    min-width: 80px;
+    height: 28px;
+  }
+
+  /* Toasts */
+  .toast-stack {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 300;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    pointer-events: none;
+  }
+  
+  .toast {
+    background: var(--wb-white);
+    border: 1px solid var(--wb-border);
+    border-left: 3px solid var(--wb-gold);
+    border-radius: var(--radius);
+    padding: 14px 18px;
+    min-width: 300px;
+    max-width: 380px;
+    box-shadow: var(--shadow-lg);
+    pointer-events: auto;
+    animation: toastSlide 0.3s ease;
+    position: relative;
+  }
+  
+  @keyframes toastSlide {
+    from { opacity: 0; transform: translateX(20px); }
+    to { opacity: 1; transform: translateX(0); }
+  }
+  
+  .toast-out { animation: toastOut 0.2s ease forwards; }
+  @keyframes toastOut { to { opacity: 0; transform: translateX(20px); } }
+  
+  .toast-title {
+    font-family: var(--font-serif);
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--wb-black);
+    margin-bottom: 4px;
+  }
+  
+  .toast-msg {
+    font-size: 12px;
+    color: var(--wb-gray);
+    line-height: 1.5;
+  }
+  
+  .toast-close {
+    position: absolute;
+    top: 8px;
+    right: 10px;
+    background: none;
+    border: none;
+    color: var(--wb-gray-light);
+    cursor: pointer;
+    font-size: 16px;
+    padding: 2px;
+    line-height: 1;
+  }
+  
+  .toast-close:hover { color: var(--wb-black); }
+
+  /* Empty */
+  .wb-empty {
+    text-align: center;
+    padding: 80px 20px;
+    color: var(--wb-gray-light);
+  }
+  
+  .wb-empty svg {
+    width: 48px;
+    height: 48px;
+    margin-bottom: 16px;
+    stroke-width: 1;
+    opacity: 0.4;
+  }
+  
+  .wb-empty h3 {
+    font-family: var(--font-serif);
+    font-size: 18px;
+    color: var(--wb-charcoal);
+    margin-bottom: 6px;
+    font-weight: 500;
+  }
+  
+  .wb-empty p {
+    font-size: 13px;
+  }
+
+  /* Responsive */
+  @media (max-width: 1024px) {
+    .stats-row { grid-template-columns: repeat(2, 1fr); }
+    .settings-layout { grid-template-columns: 1fr; }
+    .card-grid { grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
+  }
+  
+  @media (max-width: 768px) {
+    .site-header { padding: 0 16px; height: 60px; }
+    .top-nav { display: none; }
+    .sidebar { position: fixed; transform: translateX(-100%); z-index: 90; }
+    .sidebar.open { transform: translateX(0); }
+    .content { padding: 16px; }
+    .sub-header { padding: 16px; }
+    .stats-row { grid-template-columns: 1fr 1fr; }
+    .card-grid { grid-template-columns: 1fr; }
+    .wb-search { width: 100%; }
+  }
+
+  /* Print */
+  @media print {
+    .site-header, .sidebar, .sub-actions { display: none !important; }
+    .content { padding: 0; overflow: visible; }
+    .card { break-inside: avoid; border: 1px solid var(--wb-border); }
+  }
+
+  /* Focus */
+  *:focus-visible {
+    outline: 2px solid var(--wb-gold);
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+</style>
+</head>
+<body>
+
+<!-- Toasts -->
+<div class="toast-stack" id="toast-stack"></div>
+
+<!-- Modals -->
+<div class="modal-overlay" id="modal-request" onclick="if(event.target===this)closeModal('request')">
+  <div class="modal-box">
+    <div class="modal-head">
+      <h2 id="req-modal-title">New Request</h2>
+      <button class="modal-close" onclick="closeModal('request')">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="wb-form-row">
+        <div class="wb-form-group">
+          <label class="wb-form-label">Customer Name *</label>
+          <input type="text" class="wb-form-input" id="req-customer" placeholder="e.g. Sarah Johnson">
+        </div>
+        <div class="wb-form-group">
+          <label class="wb-form-label">Customer Email</label>
+          <input type="email" class="wb-form-input" id="req-customer-email" placeholder="customer@email.com">
+        </div>
+      </div>
+      <div class="wb-form-row">
+        <div class="wb-form-group">
+          <label class="wb-form-label">Salesperson *</label>
+          <input type="text" class="wb-form-input" id="req-salesperson" placeholder="e.g. Jane Doe">
+        </div>
+        <div class="wb-form-group">
+          <label class="wb-form-label">Salesperson Email</label>
+          <input type="email" class="wb-form-input" id="req-salesperson-email" placeholder="staff@wbj.com">
+        </div>
+      </div>
+      <div class="wb-form-group">
+        <label class="wb-form-label">Description</label>
+        <textarea class="wb-form-input" id="req-desc" placeholder="What are they looking for?"></textarea>
+      </div>
+      <div class="wb-form-row">
+        <div class="wb-form-group">
+          <label class="wb-form-label">Priority</label>
+          <select class="wb-form-input" id="req-priority">
+            <option value="low">Low</option>
+            <option value="medium" selected>Medium</option>
+            <option value="high">High</option>
+            <option value="urgent">Urgent</option>
+          </select>
+        </div>
+        <div class="wb-form-group">
+          <label class="wb-form-label">Status</label>
+          <select class="wb-form-input" id="req-status">
+            <option value="active" selected>Active</option>
+            <option value="pending">Pending</option>
+            <option value="fulfilled">Fulfilled</option>
+            <option value="archived">Archived</option>
+          </select>
+        </div>
+      </div>
+      <div class="wb-form-group">
+        <label class="wb-form-label">Keywords <span style="text-transform:none;color:var(--wb-gray-light);font-weight:400;">(press Enter)</span></label>
+        <div class="tag-input-area" id="req-tags-wrap" onclick="document.getElementById('req-tag-input').focus()">
+          <input type="text" id="req-tag-input" placeholder="gold, vintage, ruby…" onkeydown="handleTagInput(event,'req-tags')" style="border:none;background:transparent;outline:none;flex:1;min-width:80px;">
+        </div>
+      </div>
+      <div class="wb-form-group" style="display:flex;align-items:center;gap:10px;">
+        <input type="checkbox" id="req-pin" style="width:16px;height:16px;accent-color:var(--wb-gold);cursor:pointer;">
+        <label for="req-pin" style="font-size:13px;cursor:pointer;color:var(--wb-gray);">Pin this request (high priority)</label>
+      </div>
+      <input type="hidden" id="req-edit-id">
+    </div>
+    <div class="modal-foot">
+      <button class="wb-btn" onclick="closeModal('request')">Cancel</button>
+      <button class="wb-btn wb-btn-primary" onclick="saveRequest()">Save Request</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-inventory" onclick="if(event.target===this)closeModal('inventory')">
+  <div class="modal-box">
+    <div class="modal-head">
+      <h2 id="inv-modal-title">Add Inventory Item</h2>
+      <button class="modal-close" onclick="closeModal('inventory')">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="wb-form-group">
+        <label class="wb-form-label">Item Name *</label>
+        <input type="text" class="wb-form-input" id="inv-name" placeholder="e.g. Ruby Heart Pendant">
+      </div>
+      <div class="wb-form-group">
+        <label class="wb-form-label">Description</label>
+        <textarea class="wb-form-input" id="inv-desc" placeholder="Brief description…"></textarea>
+      </div>
+      <div class="wb-form-row">
+        <div class="wb-form-group">
+          <label class="wb-form-label">Category</label>
+          <input type="text" class="wb-form-input" id="inv-category" placeholder="e.g. Necklace">
+        </div>
+        <div class="wb-form-group">
+          <label class="wb-form-label">Stock Qty</label>
+          <input type="number" class="wb-form-input" id="inv-stock" value="1" min="0">
+        </div>
+      </div>
+      <div class="wb-form-group">
+        <label class="wb-form-label">Keywords <span style="text-transform:none;color:var(--wb-gray-light);font-weight:400;">(press Enter)</span></label>
+        <div class="tag-input-area" id="inv-tags-wrap" onclick="document.getElementById('inv-tag-input').focus()">
+          <input type="text" id="inv-tag-input" placeholder="ruby, gold, heart…" onkeydown="handleTagInput(event,'inv-tags')" style="border:none;background:transparent;outline:none;flex:1;min-width:80px;">
+        </div>
+      </div>
+      <input type="hidden" id="inv-edit-id">
+    </div>
+    <div class="modal-foot">
+      <button class="wb-btn" onclick="closeModal('inventory')">Cancel</button>
+      <button class="wb-btn wb-btn-primary" onclick="saveInventory()">Save Item</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-confirm" onclick="if(event.target===this)resolveConfirm(false)">
+  <div class="modal-box" style="width:400px;text-align:center;">
+    <div class="modal-body" style="padding-top:32px;">
+      <div style="width:48px;height:48px;background:var(--danger-light);color:var(--danger);border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;font-size:22px;font-family:var(--font-serif);">!</div>
+      <h2 style="font-family:var(--font-serif);font-size:22px;margin-bottom:8px;">Are you sure?</h2>
+      <p id="confirm-msg" style="font-size:14px;color:var(--wb-gray);line-height:1.6;">This action cannot be undone.</p>
+    </div>
+    <div class="modal-foot" style="justify-content:center;padding-bottom:24px;">
+      <button class="wb-btn" onclick="resolveConfirm(false)">Cancel</button>
+      <button class="wb-btn wb-btn-danger" onclick="resolveConfirm(true)">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<!-- SITE HEADER -->
+<header class="site-header">
+  <div class="site-header-left">
+    <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
+      <a class="logo-wrap" onclick="navigate('requests')" title="Walter Bauman Jewelers">
+        <img src="https://i.imgur.com/walterlogo1_140x.jpeg" alt="Walter Bauman Jewelers" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+        <div style="display:none;flex-direction:column;align-items:center;">
+          <span style="font-family:var(--font-serif);font-size:20px;font-weight:700;letter-spacing:2px;">WBJ</span>
+          <span style="font-size:9px;text-transform:uppercase;letter-spacing:3px;color:var(--wb-gray);">Walter Bauman</span>
+        </div>
+        <span class="logo-subtitle">Your Personal Jeweler</span>
+      </a>
+      <a href="https://walterbaumanjewelers.com" target="_blank" rel="noopener" style="font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:1.5px;color:var(--wb-gold);text-decoration:none;border:1px solid rgba(201,169,110,0.3);padding:2px 10px;border-radius:2px;transition:all 0.2s ease;" onmouseover="this.style.background='var(--wb-gold-dim)'" onmouseout="this.style.background='transparent'">Shop Now ↗</a>
+    </div>
+    <nav class="top-nav">
+      <a class="active" data-page="requests" onclick="navigate('requests')">Requests</a>
+      <a data-page="inventory" onclick="navigate('inventory')">Inventory</a>
+      <a data-page="matches" onclick="navigate('matches')">Matches</a>
+      <a data-page="history" onclick="navigate('history')">History</a>
+      <a data-page="analytics" onclick="navigate('analytics')">Analytics</a>
+    </nav>
+  </div>
+  <div class="site-header-right">
+    <button class="header-action" onclick="toggleTheme()">Theme</button>
+    <button class="header-action gold-btn" onclick="openModal('request')">+ New Request</button>
+  </div>
+</header>
+
+<div class="app">
+  <!-- SIDEBAR -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-section">
+      <div class="sidebar-label">Workspace</div>
+      <div class="sidebar-item active" data-page="requests" onclick="navigate('requests')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+        <span>Requests</span>
+      </div>
+      <div class="sidebar-item" data-page="inventory" onclick="navigate('inventory')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v2"/></svg>
+        <span>Inventory</span>
+      </div>
+      <div class="sidebar-item" data-page="matches" onclick="navigate('matches')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0"/></svg>
+        <span>Matches</span>
+        <span class="sidebar-badge" id="sidebar-badge" style="display:none;">0</span>
+      </div>
+      <div class="sidebar-item" data-page="history" onclick="navigate('history')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+        <span>History</span>
+        <span class="sidebar-badge" id="sidebar-history-badge" style="display:none;">0</span>
+      </div>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-label">Insights</div>
+      <div class="sidebar-item" data-page="analytics" onclick="navigate('analytics')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>
+        <span>Analytics</span>
+      </div>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-label">System</div>
+      <div class="sidebar-item" data-page="settings" onclick="navigate('settings')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+        <span>Settings</span>
+      </div>
+    </div>
+    <div class="mini-profile" id="mini-profile-wrap">
+      <div class="mini-avatar" id="mini-avatar-initials">?</div>
+      <div class="mini-info">
+        <div class="mini-name" id="mini-profile-name">Set up profile</div>
+        <div class="mini-role" id="mini-profile-role">Salesperson</div>
+      </div>
+      <button onclick="navigate('settings');showSettingPanel('profile',document.querySelector('[data-panel=profile]'))" style="background:none;border:none;cursor:pointer;color:var(--wb-gray-light);font-size:14px;padding:2px;" title="Edit profile">✎</button>
+    </div>
+  </aside>
+
+  <!-- MAIN -->
+  <div class="main">
+    <!-- REQUESTS -->
+    <div class="page active" id="page-requests">
+      <div class="sub-header">
+        <div class="page-title-group">
+          <h1>Customer Requests</h1>
+          <p>Track client wishlists, manage priorities, and fulfill orders.</p>
+        </div>
+        <div class="sub-actions">
+          <div class="wb-search">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+            <input type="text" id="search-req" placeholder="Search requests…" oninput="debouncedSearch(this.value)">
+          </div>
+          <select class="wb-form-input" id="req-filter" onchange="renderRequests()" style="width:130px;height:38px;">
+            <option value="all">All Statuses</option>
+            <option value="active">Active</option>
+            <option value="pending">Pending</option>
+            <option value="pinned">Pinned</option>
+          </select>
+          <select class="wb-form-input" id="req-sort" onchange="renderRequests()" style="width:140px;height:38px;">
+            <option value="date-desc">Newest First</option>
+            <option value="date-asc">Oldest First</option>
+            <option value="priority">Priority</option>
+            <option value="name-asc">Name A-Z</option>
+          </select>
+          <button class="wb-btn wb-btn-primary" onclick="openModal('request')">+ New Request</button>
+        </div>
+      </div>
+      <div class="content">
+        <div id="requests-container"></div>
+      </div>
+    </div>
+
+    <!-- INVENTORY -->
+    <div class="page" id="page-inventory">
+      <div class="sub-header">
+        <div class="page-title-group">
+          <h1>Inventory</h1>
+          <p>Manage stock, track matches, and catalog your collection.</p>
+        </div>
+        <div class="sub-actions">
+          <div class="wb-search">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+            <input type="text" id="search-inv" placeholder="Search inventory…" oninput="debouncedSearchInv(this.value)">
+          </div>
+          <select class="wb-form-input" id="inv-sort" onchange="renderInventory()" style="width:140px;height:38px;">
+            <option value="date-desc">Newest First</option>
+            <option value="date-asc">Oldest First</option>
+            <option value="name-asc">Name A-Z</option>
+            <option value="stock-low">Low Stock</option>
+          </select>
+          <button class="wb-btn wb-btn-primary" onclick="openModal('inventory')">+ Add Item</button>
+        </div>
+      </div>
+      <div class="content">
+        <div id="inventory-container"></div>
+      </div>
+    </div>
+
+    <!-- MATCHES -->
+    <div class="page" id="page-matches">
+      <div class="sub-header">
+        <div class="page-title-group">
+          <h1>Match Alerts</h1>
+          <p>AI-powered keyword matching between inventory and active requests.</p>
+        </div>
+        <div class="sub-actions">
+          <button class="wb-btn wb-btn-sm" onclick="markAllRead()">Mark all read</button>
+          <button class="wb-btn wb-btn-sm wb-btn-ghost" onclick="clearAllMatches()">Clear history</button>
+        </div>
+      </div>
+      <div class="content">
+        <div id="matches-container"></div>
+      </div>
+    </div>
+
+    <!-- HISTORY -->
+    <div class="page" id="page-history">
+      <div class="sub-header">
+        <div class="page-title-group">
+          <h1>History</h1>
+          <p>Fulfilled and archived requests. Reopen to move a record back to active matching.</p>
+        </div>
+        <div class="sub-actions">
+          <div class="wb-search">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+            <input type="text" id="search-hist" placeholder="Search history…" oninput="debouncedSearchHist(this.value)">
+          </div>
+          <select class="wb-form-input" id="hist-filter" onchange="renderHistory()" style="width:130px;height:38px;">
+            <option value="all">All Statuses</option>
+            <option value="fulfilled">Fulfilled</option>
+            <option value="archived">Archived</option>
+          </select>
+          <select class="wb-form-input" id="hist-sort" onchange="renderHistory()" style="width:160px;height:38px;">
+            <option value="date-desc">Recently Fulfilled</option>
+            <option value="date-asc">Oldest First</option>
+            <option value="name-asc">Name A-Z</option>
+          </select>
+        </div>
+      </div>
+      <div class="content">
+        <div id="history-container"></div>
+      </div>
+    </div>
+
+    <!-- ANALYTICS -->
+    <div class="page" id="page-analytics">
+      <div class="sub-header">
+        <div class="page-title-group">
+          <h1>Analytics</h1>
+          <p>Performance metrics and business intelligence.</p>
+        </div>
+        <div class="sub-actions">
+          <select class="wb-form-input" id="analytics-range" onchange="renderAnalytics()" style="width:140px;height:38px;">
+            <option value="7">Last 7 days</option>
+            <option value="30">Last 30 days</option>
+            <option value="90">Last 90 days</option>
+            <option value="all">All time</option>
+          </select>
+        </div>
+      </div>
+      <div class="content">
+        <div class="stats-row" id="stats-row"></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+          <div class="chart-box">
+            <div class="chart-header">
+              <div class="chart-title">Request Volume</div>
+            </div>
+            <canvas id="chart-volume" height="200" style="width:100%;"></canvas>
+          </div>
+          <div class="chart-box">
+            <div class="chart-header">
+              <div class="chart-title">Keyword Distribution</div>
+            </div>
+            <canvas id="chart-keywords" height="200" style="width:100%;"></canvas>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SETTINGS -->
+    <div class="page" id="page-settings">
+      <div class="sub-header">
+        <div class="page-title-group">
+          <h1>Settings</h1>
+          <p>Customize your workspace and manage data.</p>
+        </div>
+      </div>
+      <div class="content">
+        <div class="settings-layout">
+          <div class="settings-nav">
+            <div class="settings-nav-item active" onclick="showSettingPanel('matching',this)">Matching Engine</div>
+            <div class="settings-nav-item" onclick="showSettingPanel('appearance',this)">Appearance</div>
+            <div class="settings-nav-item" onclick="showSettingPanel('notifications',this)">Notifications</div>
+            <div class="settings-nav-item" onclick="showSettingPanel('email',this)">Email & Alerts</div>
+            <div class="settings-nav-item" data-panel="profile" onclick="showSettingPanel('profile',this)">Profile & Team</div>
+            <div class="settings-nav-item" onclick="showSettingPanel('workflow',this)">Workflow Rules</div>
+            <div class="settings-nav-item" onclick="showSettingPanel('inventory-prefs',this)">Inventory Prefs</div>
+            <div class="settings-nav-item" onclick="showSettingPanel('integrations',this)">Integrations</div>
+            <div class="settings-nav-item" onclick="showSettingPanel('audit',this)">Audit Log</div>
+            <div class="settings-nav-item" onclick="showSettingPanel('data',this)">Data Management</div>
+          </div>
+          <div>
+            <!-- Matching -->
+            <div class="settings-panel" id="panel-matching">
+              <h3>Matching Engine</h3>
+              <div class="setting-line">
+                <div class="setting-info">
+                  <h4>Sensitivity Threshold</h4>
+                  <p>Minimum match score to trigger alerts</p>
+                </div>
+                <div style="display:flex;align-items:center;gap:12px;">
+                  <input type="range" min="1" max="10" value="3" id="sens-slider" oninput="updateSetting('sensitivity',this.value)" style="width:120px;">
+                  <span id="sens-val" style="font-family:var(--font-mono);font-size:13px;color:var(--wb-gold);min-width:36px;">30%</span>
+                </div>
+              </div>
+              <div class="setting-line">
+                <div class="setting-info">
+                  <h4>Fuzzy Matching</h4>
+                  <p>Use Levenshtein distance for similar words</p>
+                </div>
+                <div class="toggle on" id="tog-fuzzy" onclick="toggleSetting('fuzzy',this)"></div>
+              </div>
+              <div class="setting-line">
+                <div class="setting-info">
+                  <h4>Auto-archive fulfilled</h4>
+                  <p>Move fulfilled requests after 7 days</p>
+                </div>
+                <div class="toggle" id="tog-autoarchive" onclick="toggleSetting('autoArchive',this)"></div>
+              </div>
+            </div>
+
+            <!-- Appearance -->
+            <div class="settings-panel" id="panel-appearance" style="display:none;">
+              <h3>Appearance</h3>
+              <div class="setting-line">
+                <div class="setting-info">
+                  <h4>Theme</h4>
+                  <p>Choose your preferred color scheme</p>
+                </div>
+                <select class="wb-form-input" id="theme-select" onchange="setTheme(this.value)" style="width:140px;">
+                  <option value="light">Light</option>
+                  <option value="dark">Dark</option>
+                </select>
+              </div>
+              <div class="setting-line" style="flex-direction:column;align-items:stretch;">
+                <div class="setting-info" style="display:flex;justify-content:space-between;margin-bottom:12px;">
+                  <h4>Accent Color</h4>
+                  <input type="text" id="hex-display" class="wb-form-input" style="width:90px;text-align:center;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;" value="#C9A96E" onchange="onHexChange(this.value)">
+                </div>
+                <div class="wheel-area">
+                  <div class="wheel-canvas-wrap" id="wheel-wrap">
+                    <canvas id="color-wheel" width="200" height="200"></canvas>
+                    <div class="wheel-cursor" id="wheel-cursor"></div>
+                  </div>
+                  <div style="display:flex;align-items:center;gap:12px;">
+                    <span style="font-size:11px;color:var(--wb-gray);text-transform:uppercase;letter-spacing:1px;">Brightness</span>
+                    <input type="range" min="10" max="100" value="79" id="val-slider" style="width:120px;" oninput="onWheelVal(this.value)">
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Notifications -->
+            <div class="settings-panel" id="panel-notifications" style="display:none;">
+              <h3>Notifications</h3>
+              <div class="setting-line">
+                <div class="setting-info">
+                  <h4>Sound Effects</h4>
+                  <p>Play a chime on new matches</p>
+                </div>
+                <div class="toggle on" id="tog-sound" onclick="toggleSetting('sound',this)"></div>
+              </div>
+              <div class="setting-line">
+                <div class="setting-info">
+                  <h4>Desktop Notifications</h4>
+                  <p>Browser push notifications</p>
+                </div>
+                <div class="toggle" id="tog-desktop" onclick="toggleSetting('desktopNotif',this)"></div>
+              </div>
+            </div>
+
+            <!-- Email & Alerts -->
+            <div class="settings-panel" id="panel-email" style="display:none;">
+              <h3>Email & Alerts</h3>
+              <div class="setting-line">
+                <div class="setting-info">
+                  <h4>Email on Match</h4>
+                  <p>Send email to salesperson when inventory matches a request</p>
+                </div>
+                <div class="toggle on" id="tog-email-match" onclick="toggleSetting('emailOnMatch',this)"></div>
+              </div>
+              <div class="setting-line">
+                <div class="setting-info">
+                  <h4>CC Customer on Match</h4>
+                  <p>Also email the customer directly when a match is found</p>
+                </div>
+                <div class="toggle" id="tog-email-customer" onclick="toggleSetting('emailCustomer',this)"></div>
+              </div>
+              <div class="setting-line">
+                <div class="setting-info">
+                  <h4>Sender Name</h4>
+                  <p>Display name shown in outgoing match notification emails</p>
+                </div>
+                <input type="text" class="wb-form-input" style="width:200px;" placeholder="Walter Bauman Jewelers" id="email-sender-name" value="Walter Bauman Jewelers" onchange="Store.data.settings.emailSenderName=this.value">
+              </div>
+              <div class="setting-line">
+                <div class="setting-info">
+                  <h4>Reply-To Address</h4>
+                  <p>Customers can reply to this email address</p>
+                </div>
+                <input type="email" class="wb-form-input" style="width:220px;" placeholder="info@walterbaumanjewelers.com" id="email-reply-to" onchange="Store.data.settings.emailReplyTo=this.value">
+              </div>
+              <div class="setting-line">
+                <div class="setting-info">
+                  <h4>Daily Digest</h4>
+                  <p>Send a daily summary of new requests and matches each morning</p>
+                </div>
+                <div class="toggle" id="tog-daily-digest" onclick="toggleSetting('dailyDigest',this)"></div>
+              </div>
+              <div class="setting-line">
+                <div class="setting-info">
+                  <h4>Email Template Preview</h4>
+                  <p>Test the match notification template</p>
+                </div>
+                <button class="wb-btn wb-btn-sm" onclick="Toast.show('Preview Sent','A test email was sent to the reply-to address.')">Send Test</button>
+              </div>
+            </div>
+
+            <!-- Profile & Team -->
+            <div class="settings-panel" id="panel-profile" style="display:none;">
+              <h3>Profile & Team</h3>
+              <div class="setting-line">
+                <div class="setting-info">
+                  <h4>Your Name</h4>
+                  <p>Shown in the sidebar and on requests you create</p>
+                </div>
+                <input type="text" class="wb-form-input" style="width:200px;" placeholder="Jane Doe" id="profile-name-input" oninput="updateProfileDisplay()">
+              </div>
+              <div class="setting-line">
+                <div class="setting-info">
+                  <h4>Your Role</h4>
+                  <p>Your position at Walter Bauman Jewelers</p>
+                </div>
+                <select class="wb-form-input" style="width:200px;" id="profile-role-select" onchange="updateProfileDisplay()">
+                  <option>Salesperson</option>
+                  <option>Senior Associate</option>
+                  <option>Manager</option>
+                  <option>Inventory Specialist</option>
+                  <option>Owner</option>
+                  <option>Administrator</option>
+                </select>
+              </div>
+              <div class="setting-line">
+                <div class="setting-info">
+                  <h4>Your Email</h4>
+                  <p>Used as the default salesperson email on new requests</p>
+                </div>
+                <input type="email" class="wb-form-input" style="width:220px;" placeholder="you@wbj.com" id="profile-email-input" onchange="Store.data.settings.profileEmail=this.value">
+              </div>
+              <div class="setting-line">
+                <div class="setting-info">
+                  <h4>Team Members</h4>
+                  <p>Staff who can be assigned as salespersons on requests</p>
+                </div>
+                <button class="wb-btn wb-btn-sm" onclick="Toast.show('Team','Team management is available in the Enterprise plan.')">Manage →</button>
+              </div>
+            </div>
+
+            <!-- Workflow Rules -->
+            <div class="settings-panel" id="panel-workflow" style="display:none;">
+              <h3>Workflow Rules</h3>
+              <div class="setting-line">
+                <div class="setting-info">
+                  <h4>Auto-archive Fulfilled</h4>
+                  <p>Move fulfilled requests to archive after 7 days</p>
+                </div>
+                <div class="toggle" id="tog-workflow-archive" onclick="toggleSetting('autoArchive',this)"></div>
+              </div>
+              <div class="setting-line">
+                <div class="setting-info">
+                  <h4>Escalate Stale Requests</h4>
+                  <p>Flag requests with no activity after N days as urgent</p>
+                </div>
+                <div style="display:flex;align-items:center;gap:8px;">
+                  <input type="number" class="wb-form-input" style="width:70px;text-align:center;" value="14" min="1" max="90" onchange="Store.data.settings.staleDays=this.value">
+                  <span style="font-size:12px;color:var(--wb-gray);">days</span>
+                </div>
+              </div>
+              <div class="setting-line">
+                <div class="setting-info">
+                  <h4>Auto-pin Urgent Requests</h4>
+                  <p>Automatically pin requests marked as urgent priority</p>
+                </div>
+                <div class="toggle on" id="tog-autopin" onclick="toggleSetting('autoPin',this)"></div>
+              </div>
+              <div class="setting-line">
+                <div class="setting-info">
+                  <h4>Require Description</h4>
+                  <p>Prevent saving a request without a description</p>
+                </div>
+                <div class="toggle" id="tog-req-desc" onclick="toggleSetting('requireDesc',this)"></div>
+              </div>
+              <div class="setting-line">
+                <div class="setting-info">
+                  <h4>Require Keywords</h4>
+                  <p>Minimum keyword count before saving a request</p>
+                </div>
+                <div style="display:flex;align-items:center;gap:8px;">
+                  <input type="number" class="wb-form-input" style="width:70px;text-align:center;" value="2" min="0" max="10" onchange="Store.data.settings.minKeywords=this.value">
+                  <span style="font-size:12px;color:var(--wb-gray);">keywords</span>
+                </div>
+              </div>
+              <div class="setting-line">
+                <div class="setting-info">
+                  <h4>Match Confirmation Required</h4>
+                  <p>Salesperson must confirm a match before it is marked fulfilled</p>
+                </div>
+                <div class="toggle on" id="tog-match-confirm" onclick="toggleSetting('matchConfirm',this)"></div>
+              </div>
+            </div>
+
+            <!-- Inventory Prefs -->
+            <div class="settings-panel" id="panel-inventory-prefs" style="display:none;">
+              <h3>Inventory Preferences</h3>
+              <div class="setting-line">
+                <div class="setting-info">
+                  <h4>Low Stock Threshold</h4>
+                  <p>Flag items as low stock below this quantity</p>
+                </div>
+                <div style="display:flex;align-items:center;gap:8px;">
+                  <input type="number" class="wb-form-input" style="width:70px;text-align:center;" value="2" min="0" onchange="Store.data.settings.lowStockQty=this.value">
+                  <span style="font-size:12px;color:var(--wb-gray);">units</span>
+                </div>
+              </div>
+              <div class="setting-line">
+                <div class="setting-info">
+                  <h4>Show Low Stock Warning</h4>
+                  <p>Badge inventory items that fall below the threshold</p>
+                </div>
+                <div class="toggle on" id="tog-low-stock" onclick="toggleSetting('showLowStock',this)"></div>
+              </div>
+              <div class="setting-line">
+                <div class="setting-info">
+                  <h4>Default Category</h4>
+                  <p>Pre-fill category field when adding new inventory</p>
+                </div>
+                <select class="wb-form-input" style="width:160px;" onchange="Store.data.settings.defaultCategory=this.value">
+                  <option value="">— None —</option>
+                  <option>Ring</option>
+                  <option>Necklace</option>
+                  <option>Bracelet</option>
+                  <option>Earrings</option>
+                  <option>Pendant</option>
+                  <option>Brooch</option>
+                  <option>Watch</option>
+                  <option>Estate</option>
+                </select>
+              </div>
+              <div class="setting-line">
+                <div class="setting-info">
+                  <h4>Track Price History</h4>
+                  <p>Record price changes over time per inventory item</p>
+                </div>
+                <div class="toggle" id="tog-price-hist" onclick="Toast.show('Coming Soon','Price history tracking launches in v4.0.')"></div>
+              </div>
+              <div class="setting-line">
+                <div class="setting-info">
+                  <h4>SKU Auto-generation</h4>
+                  <p>Automatically assign SKU codes to new items</p>
+                </div>
+                <div class="toggle on" id="tog-sku-auto" onclick="toggleSetting('autoSku',this)"></div>
+              </div>
+              <div class="setting-line">
+                <div class="setting-info">
+                  <h4>Show Retired Items</h4>
+                  <p>Include sold-out or retired inventory in search results</p>
+                </div>
+                <div class="toggle" id="tog-show-retired" onclick="toggleSetting('showRetired',this)"></div>
+              </div>
+            </div>
+
+            <!-- Integrations -->
+            <div class="settings-panel" id="panel-integrations" style="display:none;">
+              <h3>Integrations</h3>
+              <div class="setting-line">
+                <div class="setting-info">
+                  <h4>Website Sync</h4>
+                  <p>Sync inventory with walterbaumanjewelers.com product catalog</p>
+                </div>
+                <div style="display:flex;align-items:center;gap:8px;">
+                  <span style="font-size:11px;padding:3px 10px;background:var(--success-light);color:var(--success);border-radius:20px;font-weight:500;">Connected</span>
+                  <button class="wb-btn wb-btn-sm" onclick="Toast.show('Sync','Catalog sync initiated. Items will update within 5 minutes.')">Sync Now</button>
+                </div>
+              </div>
+              <div class="setting-line">
+                <div class="setting-info">
+                  <h4>Google Calendar</h4>
+                  <p>Push client appointment reminders to Google Calendar</p>
+                </div>
+                <div style="display:flex;align-items:center;gap:8px;">
+                  <span style="font-size:11px;padding:3px 10px;background:var(--wb-off-white);color:var(--wb-gray-light);border-radius:20px;font-weight:500;">Not connected</span>
+                  <button class="wb-btn wb-btn-sm" onclick="Toast.show('Google Calendar','Redirect to OAuth… (requires backend configuration)')">Connect</button>
+                </div>
+              </div>
+              <div class="setting-line">
+                <div class="setting-info">
+                  <h4>QuickBooks</h4>
+                  <p>Export fulfilled requests as invoices to QuickBooks Online</p>
+                </div>
+                <div style="display:flex;align-items:center;gap:8px;">
+                  <span style="font-size:11px;padding:3px 10px;background:var(--success-light);color:var(--success);border-radius:20px;font-weight:500;">Connected</span>
+                  <button class="wb-btn wb-btn-sm" onclick="Toast.show('QuickBooks','Last synced 2 hours ago. 3 invoices pending.')">View →</button>
+                </div>
+              </div>
+              <div class="setting-line">
+                <div class="setting-info">
+                  <h4>Slack Notifications</h4>
+                  <p>Post match alerts to a Slack channel</p>
+                </div>
+                <div style="display:flex;align-items:center;gap:8px;">
+                  <span style="font-size:11px;padding:3px 10px;background:var(--wb-off-white);color:var(--wb-gray-light);border-radius:20px;font-weight:500;">Not connected</span>
+                  <button class="wb-btn wb-btn-sm" onclick="Toast.show('Slack','Configure webhook URL in your Slack workspace settings.')">Connect</button>
+                </div>
+              </div>
+              <div class="setting-line">
+                <div class="setting-info">
+                  <h4>API Access</h4>
+                  <p>REST API key for custom integrations and third-party tools</p>
+                </div>
+                <div style="display:flex;align-items:center;gap:8px;">
+                  <code style="font-family:var(--font-mono);font-size:11px;background:var(--wb-off-white);border:1px solid var(--wb-border);padding:4px 10px;border-radius:4px;color:var(--wb-gray);">wbj_live_••••••••••1a2f</code>
+                  <button class="wb-btn wb-btn-sm" onclick="Toast.show('API Key','Copied to clipboard.')">Copy</button>
+                </div>
+              </div>
+              <div class="setting-line">
+                <div class="setting-info">
+                  <h4>Webhook URL</h4>
+                  <p>POST events to an external service on every match</p>
+                </div>
+                <input type="url" class="wb-form-input" style="width:240px;" placeholder="https://hooks.example.com/..." onchange="Store.data.settings.webhookUrl=this.value">
+              </div>
+            </div>
+
+            <!-- Audit Log -->
+            <div class="settings-panel" id="panel-audit" style="display:none;">
+              <h3>Audit Log</h3>
+              <p style="font-size:12px;color:var(--wb-gray);margin-bottom:20px;">All user actions are timestamped and stored locally. Exportable on request.</p>
+              <div id="audit-log-list" style="display:flex;flex-direction:column;gap:6px;max-height:400px;overflow-y:auto;">
+              </div>
+              <div style="margin-top:16px;display:flex;gap:8px;">
+                <button class="wb-btn wb-btn-sm" onclick="renderAuditLog()">Refresh</button>
+                <button class="wb-btn wb-btn-sm" onclick="exportData('json')">Export Log</button>
+              </div>
+            </div>
+
+            <!-- Data -->
+            <div class="settings-panel" id="panel-data" style="display:none;">
+              <h3>Data Management</h3>
+              <div class="setting-line">
+                <div class="setting-info">
+                  <h4>Export Backup</h4>
+                  <p>Download full JSON backup with settings</p>
+                </div>
+                <div style="display:flex;gap:8px;">
+                  <button class="wb-btn wb-btn-sm" onclick="exportData('json')">JSON</button>
+                  <button class="wb-btn wb-btn-sm" onclick="exportData('csv')">CSV</button>
+                </div>
+              </div>
+              <div class="setting-line">
+                <div class="setting-info">
+                  <h4>Import Backup</h4>
+                  <p>Restore from JSON file</p>
+                </div>
+                <label class="wb-btn wb-btn-sm" style="cursor:pointer;">Import<input type="file" accept=".json" style="display:none" onchange="importData(this)"></label>
+              </div>
+              <div class="setting-line">
+                <div class="setting-info">
+                  <h4>Reset Settings</h4>
+                  <p>Restore defaults without deleting data</p>
+                </div>
+                <button class="wb-btn wb-btn-sm" onclick="resetSettings()">Reset</button>
+              </div>
+              <div class="setting-line">
+                <div class="setting-info">
+                  <h4 style="color:var(--danger)">Danger Zone</h4>
+                  <p>Permanently erase all data</p>
+                </div>
+                <button class="wb-btn wb-btn-sm wb-btn-danger" onclick="clearAllData()">Erase Everything</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ============================
+   WALTER BAUMAN PRO — ENGINE
+   ============================ */
+
+const $ = (s, e = document) => e.querySelector(s);
+const $$ = (s, e = document) => Array.from(e.querySelectorAll(s));
+
+/* ---------- STATE ---------- */
+const Store = {
+  data: {
+    requests: [], inventory: [], matches: [], activity: [],
+    settings: {
+      sensitivity: 3, fuzzy: true, autoArchive: false,
+      theme: 'light', accent: '#c9a96e', accentHover: '#d4b87e',
+      sound: true, desktopNotif: false
+    },
+    search: '', searchInv: '', searchHist: '', currentPage: 'requests'
+  },
+
+  init() {
+    const raw = localStorage.getItem('bauman-pro-v2');
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw);
+        Object.assign(this.data, parsed);
+        this.migrate();
+      } catch (e) {}
+    }
+    this.subscribe();
+  },
+
+  migrate() {
+    this.data.requests.forEach(r => {
+      if (!r.status) r.status = 'active';
+      if (!r.priority) r.priority = 'medium';
+    });
+  },
+
+  subscribe() {
+    const orig = JSON.stringify(this.data);
+    setInterval(() => {
+      const now = JSON.stringify(this.data);
+      if (now !== orig) {
+        localStorage.setItem('bauman-pro-v2', now);
+      }
+    }, 600);
+  },
+
+  get(k) { return this.data[k]; },
+  set(k, v) { this.data[k] = v; }
+};
+
+/* ---------- UTILITIES ---------- */
+const uid = () => 'x' + Math.random().toString(36).slice(2, 8) + Date.now().toString(36).slice(-4);
+const now = () => new Date().toISOString();
+
+function timeAgo(iso) {
+  if (!iso) return '';
+  const d = new Date(iso), diff = (Date.now() - d) / 1000;
+  if (diff < 60) return 'Just now';
+  if (diff < 3600) return Math.floor(diff / 60) + 'm';
+  if (diff < 86400) return Math.floor(diff / 3600) + 'h';
+  if (diff < 604800) return Math.floor(diff / 86400) + 'd';
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+function initials(n) { return n.split(' ').map(x => x[0]).join('').toUpperCase().slice(0, 2); }
+
+function escapeReg(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+
+function highlight(text, q) {
+  if (!q || !text) return String(text || '');
+  return String(text).replace(new RegExp(`(${escapeReg(q)})`, 'gi'), '<mark style="background:var(--wb-gold-dim);color:var(--wb-black);padding:0 2px;border-radius:2px;">$1</mark>');
+}
+
+function levenshtein(a, b) {
+  const m = a.length, n = b.length;
+  if (!m) return n; if (!n) return m;
+  const matrix = Array.from({ length: n + 1 }, (_, i) => [i]);
+  for (let j = 0; j <= m; j++) matrix[0][j] = j;
+  for (let i = 1; i <= n; i++) {
+    for (let j = 1; j <= m; j++) {
+      matrix[i][j] = a[j - 1] === b[i - 1] ? matrix[i - 1][j - 1] : 1 + Math.min(matrix[i - 1][j - 1], matrix[i - 1][j], matrix[i][j - 1]);
+    }
+  }
+  return matrix[n][m];
+}
+
+function wordSim(a, b) {
+  a = a.toLowerCase(); b = b.toLowerCase();
+  if (a === b) return 1;
+  if (a.length < 2 || b.length < 2) return (a.includes(b) || b.includes(a)) ? 0.85 : 0;
+  const dist = levenshtein(a, b), max = Math.max(a.length, b.length);
+  return Math.max(0, 1 - dist / max);
+}
+
+/* ---------- TAG INPUT ---------- */
+const TagInput = {
+  store: { 'req-tags': [], 'inv-tags': [] },
+  add(s, v) {
+    const val = v.trim().toLowerCase();
+    if (val && !this.store[s].includes(val)) { this.store[s].push(val); this.render(s); }
+  },
+  remove(s, t) { this.store[s] = this.store[s].filter(x => x !== t); this.render(s); },
+  clear(s) { this.store[s] = []; this.render(s); },
+  render(s) {
+    const isReq = s === 'req-tags';
+    const wrap = $(isReq ? '#req-tags-wrap' : '#inv-tags-wrap');
+    const input = $(isReq ? '#req-tag-input' : '#inv-tag-input');
+    wrap.innerHTML = '';
+    this.store[s].forEach(t => {
+      const chip = document.createElement('span');
+      chip.className = 'wb-tag';
+      chip.innerHTML = `${t}<span class="remove" onclick="TagInput.remove('${s}','${t}')">×</span>`;
+      wrap.appendChild(chip);
+    });
+    wrap.appendChild(input);
+  }
+};
+
+function handleTagInput(e, s) {
+  if (e.key === 'Enter' || e.key === ',') {
+    e.preventDefault();
+    TagInput.add(s, e.target.value);
+    e.target.value = '';
+  }
+  if (e.key === 'Backspace' && !e.target.value && TagInput.store[s].length) {
+    TagInput.store[s].pop();
+    TagInput.render(s);
+  }
+}
+
+/* ---------- COLOR WHEEL ---------- */
+const Wheel = {
+  state: { h: 42, s: 0.48, v: 0.79, drag: false },
+  init() {
+    const cvs = $('#color-wheel');
+    if (!cvs) return;
+    this.draw();
+    const start = e => { this.state.drag = true; this.pick(e.touches ? e.touches[0] : e); };
+    const move = e => { if (!this.state.drag) return; e.preventDefault && e.preventDefault(); this.pick(e.touches ? e.touches[0] : e); };
+    const end = () => { this.state.drag = false; };
+    cvs.addEventListener('mousedown', start);
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', end);
+    cvs.addEventListener('touchstart', start, { passive: false });
+    window.addEventListener('touchmove', move, { passive: false });
+    window.addEventListener('touchend', end);
+  },
+  draw() {
+    const cvs = $('#color-wheel'), ctx = cvs.getContext('2d'), size = cvs.width, center = size / 2, radius = center - 6;
+    const img = ctx.createImageData(size, size), d = img.data;
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const dx = x - center, dy = y - center, dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist <= radius) {
+          const hue = (Math.atan2(dy, dx) * 180 / Math.PI + 450) % 360, sat = dist / radius;
+          const [r, g, b] = hsvToRgb(hue, sat, this.state.v);
+          const i = (y * size + x) * 4; d[i] = r; d[i + 1] = g; d[i + 2] = b; d[i + 3] = 255;
+        }
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+    const angle = this.state.h * Math.PI / 180;
+    const cx = center + Math.cos(angle) * (this.state.s * radius);
+    const cy = center + Math.sin(angle) * (this.state.s * radius);
+    const cursor = $('#wheel-cursor');
+    if (cursor) { cursor.style.left = cx + 'px'; cursor.style.top = cy + 'px'; }
+  },
+  pick(e) {
+    const cvs = $('#color-wheel'), rect = cvs.getBoundingClientRect();
+    const scale = cvs.width / rect.width;
+    const x = (e.clientX - rect.left) * scale, y = (e.clientY - rect.top) * scale;
+    const center = cvs.width / 2, radius = center - 6;
+    const dx = x - center, dy = y - center, dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist > radius) return;
+    this.state.h = (Math.atan2(dy, dx) * 180 / Math.PI + 450) % 360;
+    this.state.s = dist / radius;
+    this.apply(); this.draw();
+  },
+  apply() {
+    const [r, g, b] = hsvToRgb(this.state.h, this.state.s, this.state.v);
+    const hex = rgbToHex(r, g, b);
+    const [hr, hg, hb] = hsvToRgb(this.state.h, this.state.s, Math.min(1, this.state.v + 0.1));
+    const hhex = rgbToHex(hr, hg, hb);
+    applyAccent(hex, hhex);
+    $('#hex-display').value = hex.toUpperCase();
+    Store.data.settings.accent = hex;
+    Store.data.settings.accentHover = hhex;
+  }
+};
+
+function hsvToRgb(h, s, v) {
+  let r, g, b; const i = Math.floor(h / 60), f = h / 60 - i;
+  const p = v * (1 - s), q = v * (1 - f * s), t = v * (1 - (1 - f) * s);
+  switch (i % 6) {
+    case 0: r = v; g = t; b = p; break; case 1: r = q; g = v; b = p; break;
+    case 2: r = p; g = v; b = t; break; case 3: r = p; g = q; b = v; break;
+    case 4: r = t; g = p; b = v; break; case 5: r = v; g = p; b = q; break;
+  }
+  return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
+}
+function rgbToHex(r, g, b) { return '#' + [r, g, b].map(x => Math.max(0, Math.min(255, x)).toString(16).padStart(2, '0')).join(''); }
+function rgbToHsv(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min;
+  let h = 0; const s = max === 0 ? 0 : d / max, v = max;
+  if (d !== 0) { switch (max) { case r: h = ((g - b) / d + (g < b ? 6 : 0)) / 6; break; case g: h = ((b - r) / d + 2) / 6; break; case b: h = ((r - g) / d + 4) / 6; break; } }
+  return { h: h * 360, s, v };
+}
+
+function applyAccent(c, h) {
+  document.documentElement.style.setProperty('--wb-gold', c);
+  document.documentElement.style.setProperty('--wb-gold-light', h);
+  document.documentElement.style.setProperty('--wb-gold-dim', c + '18');
+}
+
+function onHexChange(hex) {
+  if (!/^#[0-9A-Fa-f]{6}$/.test(hex)) return;
+  const r = parseInt(hex.substr(1, 2), 16), g = parseInt(hex.substr(3, 2), 16), b = parseInt(hex.substr(5, 2), 16);
+  const hsv = rgbToHsv(r, g, b);
+  Wheel.state.h = hsv.h; Wheel.state.s = hsv.s; Wheel.state.v = hsv.v;
+  $('#val-slider').value = Math.round(hsv.v * 100);
+  Wheel.apply(); Wheel.draw();
+}
+
+function onWheelVal(v) { Wheel.state.v = parseInt(v) / 100; Wheel.apply(); Wheel.draw(); }
+
+/* ---------- MATCHING ---------- */
+function computeMatch(reqKw, invKw) {
+  const hits = [];
+  reqKw.forEach(rk => {
+    invKw.forEach(ik => {
+      const sim = Store.data.settings.fuzzy !== false ? wordSim(rk, ik) : (rk === ik ? 1 : 0);
+      if (sim >= 0.6) hits.push({ rk, ik, sim });
+    });
+  });
+  const uniq = [...new Map(hits.map(h => [h.rk, h])).values()];
+  const score = reqKw.length ? Math.round((uniq.length / reqKw.length) * 100) : 0;
+  return { score, keywords: uniq.map(u => u.rk) };
+}
+
+function checkMatches(item) {
+  let count = 0;
+  Store.data.requests.filter(r => r.status === 'active').forEach(req => {
+    const { score, keywords } = computeMatch(req.keywords, item.keywords);
+    if (score >= Store.data.settings.sensitivity * 10 && keywords.length) {
+      const exists = Store.data.matches.some(m => m.requestId === req.id && m.itemId === item.id);
+      if (!exists) {
+        Store.data.matches.unshift({
+          id: uid(), requestId: req.id, itemId: item.id,
+          salesperson: req.salesperson, customer: req.customer,
+          itemName: item.name, requestDesc: req.desc,
+          keywords, score, read: false, created: now()
+        });
+        count++;
+        Toast.show('Match Found', `${item.name} matches ${req.customer} (${score}%)`);
+        Activity.log(`Match: ${item.name} → ${req.customer}`);
+        notifyMatchByEmail(req, item, score / 100);
+      }
+    }
+  });
+  if (count) { updateBadge(); renderMatches(); }
+}
+
+/* ---------- RENDERERS ---------- */
+function getMatchCount(req) {
+  return Store.data.inventory.filter(inv => {
+    const { score } = computeMatch(req.keywords, inv.keywords);
+    return score >= Store.data.settings.sensitivity * 10;
+  }).length;
+}
+
+function getItemMatches(item) {
+  return Store.data.requests.filter(r => r.status === 'active').map(r => {
+    const { score, keywords } = computeMatch(r.keywords, item.keywords);
+    return score >= Store.data.settings.sensitivity * 10 ? { ...r, score, keywords } : null;
+  }).filter(Boolean).sort((a, b) => b.score - a.score);
+}
+
+function renderRequests() {
+  const container = $('#requests-container');
+  const filter = $('#req-filter').value;
+  const sort = $('#req-sort').value;
+  const q = Store.data.search.toLowerCase();
+  // Active page shows only open + in-progress requests; finished ones live in History
+  let items = Store.data.requests.filter(r => r.status !== 'fulfilled' && r.status !== 'archived');
+
+  if (filter !== 'all') items = items.filter(r => filter === 'pinned' ? r.pinned : r.status === filter);
+  if (q) items = items.filter(r => [r.customer, r.salesperson, r.desc, ...r.keywords].some(f => f && f.toLowerCase().includes(q)));
+
+  items.sort((a, b) => {
+    if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+    if (sort === 'date-desc') return new Date(b.created) - new Date(a.created);
+    if (sort === 'date-asc') return new Date(a.created) - new Date(b.created);
+    if (sort === 'priority') { const p = { urgent: 4, high: 3, medium: 2, low: 1 }; return (p[b.priority] || 0) - (p[a.priority] || 0); }
+    if (sort === 'name-asc') return a.customer.localeCompare(b.customer);
+    return 0;
+  });
+
+  if (!items.length) { container.innerHTML = emptyState('No requests found', 'Try adjusting filters or create a new request.'); return; }
+  container.innerHTML = `<div class="card-grid">${items.map(r => requestCard(r)).join('')}</div>`;
+}
+
+function requestCard(r) {
+  const q = Store.data.search;
+  const mc = getMatchCount(r);
+  return `
+  <div class="card ${r.pinned ? 'pinned' : ''} ${r.status === 'fulfilled' ? 'fulfilled' : ''}">
+    <div class="card-header">
+      <div>
+        <div class="card-name">${r.pinned ? '<span style="color:var(--wb-gold);margin-right:6px;">★</span>' : ''}${highlight(r.customer, q)}</div>
+        <div class="card-meta">
+          <span class="wb-status wb-status-${r.status}">${r.status}</span>
+          <span class="wb-priority wb-priority-${r.priority}">${r.priority}</span>
+          <span>·</span>
+          <span>${timeAgo(r.created)}</span>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">${r.desc ? highlight(r.desc, q) : '<em style="color:var(--wb-gray-light);">No description provided.</em>'}</div>
+    <div class="wb-tags">${r.keywords.map(k => `<span class="wb-tag" onclick="setSearch('${k}')">${highlight(k, q)}</span>`).join('')}</div>
+    ${mc > 0 && r.status === 'active' ? `<div style="margin-top:12px;font-size:12px;color:var(--wb-gold);font-weight:500;font-family:var(--font-serif);">${mc} potential match${mc !== 1 ? 'es' : ''}</div>` : ''}
+    <div class="card-footer">
+      <div style="display:flex;align-items:center;gap:8px;">
+        <div class="mini-avatar" style="width:24px;height:24px;font-size:10px;">${initials(r.salesperson)}</div>
+        <span style="font-size:12px;color:var(--wb-gray);">${r.salesperson}</span>
+      </div>
+      <div style="display:flex;gap:6px;">
+        <button class="wb-btn wb-btn-sm" onclick="openModal('request','${r.id}')">Edit</button>
+        ${r.status === 'active' ? `<button class="wb-btn wb-btn-sm wb-btn-ghost" onclick="fulfillRequest('${r.id}')">Fulfill</button>` : ''}
+        <button class="wb-btn wb-btn-sm wb-btn-danger" onclick="deleteRequest('${r.id}')">Delete</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+/* ---------- HISTORY ---------- */
+// Returns the most recent match record for a given request, or null.
+// This file has no explicit "confirmed" flag on matches, so we use the
+// latest auto-detected match as the closest available proxy for
+// "which product fulfilled this request".
+function getFulfillingMatch(reqId) {
+  const ms = Store.data.matches
+    .filter(m => m.requestId === reqId)
+    .sort((a, b) => new Date(b.created) - new Date(a.created));
+  return ms[0] || null;
+}
+
+function renderHistory() {
+  const container = $('#history-container');
+  if (!container) return;
+  const filterEl = $('#hist-filter');
+  const sortEl = $('#hist-sort');
+  const filter = filterEl ? filterEl.value : 'all';
+  const sort = sortEl ? sortEl.value : 'date-desc';
+  const q = (Store.data.searchHist || '').toLowerCase();
+
+  let items = Store.data.requests.filter(r => r.status === 'fulfilled' || r.status === 'archived');
+  if (filter !== 'all') items = items.filter(r => r.status === filter);
+  if (q) items = items.filter(r => [r.customer, r.salesperson, r.desc, ...(r.keywords || [])].some(f => f && f.toLowerCase().includes(q)));
+
+  items.sort((a, b) => {
+    const ad = new Date(a.updated_at || a.created), bd = new Date(b.updated_at || b.created);
+    if (sort === 'date-desc') return bd - ad;
+    if (sort === 'date-asc') return ad - bd;
+    if (sort === 'name-asc') return a.customer.localeCompare(b.customer);
+    return 0;
+  });
+
+  updateHistoryBadge();
+
+  if (!items.length) {
+    container.innerHTML = emptyState('No history yet', 'Fulfilled requests will appear here once you complete them.');
+    return;
+  }
+  container.innerHTML = `<div class="card-grid">${items.map(r => historyCard(r)).join('')}</div>`;
+}
+
+function historyCard(r) {
+  const q = Store.data.searchHist || '';
+  const m = getFulfillingMatch(r.id);
+  const item = m ? Store.data.inventory.find(i => i.id === m.itemId) : null;
+  const productTitle = item ? item.name : (m ? m.itemName : null);
+  const fulfilledOn = r.updated_at || r.created;
+  return `
+  <div class="card ${r.status === 'fulfilled' ? 'fulfilled' : ''}">
+    <div class="card-header">
+      <div>
+        <div class="card-name">${highlight(r.customer, q)}</div>
+        <div class="card-meta">
+          <span class="wb-status wb-status-${r.status}">${r.status}</span>
+          <span class="wb-priority wb-priority-${r.priority}">${r.priority}</span>
+          <span>·</span>
+          <span title="${new Date(fulfilledOn).toLocaleString()}">Fulfilled ${timeAgo(fulfilledOn)}</span>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">${r.desc ? highlight(r.desc, q) : '<em style="color:var(--wb-gray-light);">No description provided.</em>'}</div>
+    ${productTitle ? `
+    <div style="margin-top:14px;display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--wb-cream);border:1px solid var(--wb-border-light);border-radius:var(--radius);">
+      <div class="mini-avatar" style="width:36px;height:36px;font-size:11px;background:var(--wb-gold-dim);color:var(--wb-gold);flex-shrink:0;border-radius:var(--radius-sm);" title="${productTitle}">${initials(productTitle)}</div>
+      <div style="min-width:0;">
+        <div style="font-size:10px;color:var(--wb-gray-light);text-transform:uppercase;letter-spacing:1px;font-weight:600;margin-bottom:2px;">Fulfilled With</div>
+        <div style="font-size:13px;color:var(--wb-charcoal);font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${productTitle}</div>
+      </div>
+    </div>` : ''}
+    <div class="card-footer">
+      <div style="display:flex;align-items:center;gap:8px;">
+        <div class="mini-avatar" style="width:24px;height:24px;font-size:10px;">${initials(r.salesperson)}</div>
+        <span style="font-size:12px;color:var(--wb-gray);">${r.salesperson}</span>
+      </div>
+      <div style="display:flex;gap:6px;">
+        <button class="wb-btn wb-btn-sm" onclick="reopenRequest('${r.id}')">Reopen</button>
+        <button class="wb-btn wb-btn-sm wb-btn-danger" onclick="deleteRequest('${r.id}')">Delete</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function updateHistoryBadge() {
+  const count = Store.data.requests.filter(r => r.status === 'fulfilled').length;
+  const badge = $('#sidebar-history-badge');
+  if (!badge) return;
+  if (count > 0) { badge.textContent = count; badge.style.display = 'inline-block'; }
+  else { badge.style.display = 'none'; }
+}
+
+function renderInventory() {
+  const container = $('#inventory-container');
+  const sort = $('#inv-sort').value;
+  const q = Store.data.searchInv.toLowerCase();
+  let items = [...Store.data.inventory];
+  if (q) items = items.filter(i => [i.name, i.desc, i.category, ...i.keywords].some(f => f && f.toLowerCase().includes(q)));
+  items.sort((a, b) => {
+    if (sort === 'date-desc') return new Date(b.created) - new Date(a.created);
+    if (sort === 'date-asc') return new Date(a.created) - new Date(b.created);
+    if (sort === 'name-asc') return a.name.localeCompare(b.name);
+    if (sort === 'stock-low') return (a.stock || 0) - (b.stock || 0);
+    return 0;
+  });
+
+  if (!items.length) { container.innerHTML = emptyState('No inventory items', 'Add your first piece to start matching.'); return; }
+  container.innerHTML = `<div class="card-grid">${items.map(i => inventoryCard(i)).join('')}</div>`;
+}
+
+function inventoryCard(i) {
+  const q = Store.data.searchInv;
+  const matches = getItemMatches(i);
+  const lowStock = (i.stock || 0) < 3;
+  return `
+  <div class="card">
+    <div class="card-header">
+      <div>
+        <div class="card-name">
+          ${i.isNew ? '<span style="font-size:10px;background:var(--wb-gold-dim);color:var(--wb-gold);padding:2px 10px;border-radius:20px;font-weight:600;letter-spacing:0.5px;margin-right:8px;">NEW</span>' : ''}
+          ${highlight(i.name, q)}
+        </div>
+        <div class="card-meta">
+          ${i.category || 'Uncategorized'}
+          <span>·</span>
+          <span>Qty: ${i.stock || 0}</span>
+          ${lowStock ? '<span>·</span><span style="color:var(--danger);font-weight:500;">Low Stock</span>' : ''}
+          <span>·</span>
+          <span>${timeAgo(i.created)}</span>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">${i.desc ? highlight(i.desc, q) : '<em style="color:var(--wb-gray-light);">No description.</em>'}</div>
+    <div class="wb-tags">${i.keywords.map(k => `<span class="wb-tag" onclick="setSearchInv('${k}')">${highlight(k, q)}</span>`).join('')}</div>
+    ${matches.length ? `<div style="margin-top:14px;">
+      <div style="font-size:10px;color:var(--wb-gray-light);margin-bottom:6px;text-transform:uppercase;letter-spacing:1px;font-weight:600;">Matching Requests</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;">${matches.slice(0, 3).map(m => `<span class="wb-tag" style="background:var(--wb-gold-dim);border-color:rgba(201,169,110,0.2);color:var(--wb-gold);">${m.customer} · ${m.score}%</span>`).join('')}${matches.length > 3 ? `<span style="font-size:11px;color:var(--wb-gray-light);align-self:center;">+${matches.length - 3}</span>` : ''}</div>
+    </div>` : ''}
+    <div class="card-footer">
+      <span style="font-size:12px;color:var(--wb-gray-light);font-family:var(--font-mono);">${i.id.slice(0, 6)}</span>
+      <div style="display:flex;gap:6px;">
+        <button class="wb-btn wb-btn-sm" onclick="openModal('inventory','${i.id}')">Edit</button>
+        <button class="wb-btn wb-btn-sm wb-btn-danger" onclick="deleteInventory('${i.id}')">Delete</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderMatches() {
+  const container = $('#matches-container');
+  const items = Store.data.matches;
+  if (!items.length) { container.innerHTML = emptyState('No matches yet', 'Add inventory to trigger AI matching.'); return; }
+  container.innerHTML = `<div class="match-list">${items.map(m => matchItem(m)).join('')}</div>`;
+  updateBadge();
+}
+
+function matchItem(m) {
+  return `
+  <div class="match-item ${m.read ? '' : 'unread'}" onclick="markRead('${m.id}')">
+    <div class="match-dot ${m.read ? 'read' : ''}"></div>
+    <div class="match-content">
+      <div class="match-title">${m.itemName} <span style="color:var(--wb-gray-light);font-weight:400;">→</span> ${m.customer}</div>
+      <div class="match-sub">Notify <strong>${m.salesperson}</strong> · ${m.requestDesc || 'No description'}</div>
+      <div class="match-tags">${m.keywords.map(k => `<span class="match-tag">${k}</span>`).join(' ')}</div>
+      <div style="display:flex;align-items:center;gap:10px;margin-top:10px;">
+        <div class="progress-bar" style="flex:1;"><div style="width:${m.score}%;background:${m.score >= 70 ? 'var(--success)' : m.score >= 40 ? 'var(--wb-gold)' : 'var(--wb-gray-light)'};"></div></div>
+        <span class="match-score ${m.score >= 70 ? 'high' : m.score >= 40 ? 'med' : 'low'}">${m.score}%</span>
+      </div>
+    </div>
+    <div class="match-time">${timeAgo(m.created)}</div>
+  </div>`;
+}
+
+/* ---------- CHARTS ---------- */
+function renderAnalytics() {
+  const range = parseInt($('#analytics-range').value) || 99999;
+  const days = isNaN(range) ? 99999 : range;
+  const reqs = Store.data.requests.filter(r => days > 300 || (Date.now() - new Date(r.created)) < days * 86400000);
+  const inv = Store.data.inventory.filter(i => days > 300 || (Date.now() - new Date(i.created)) < days * 86400000);
+  const fulfilled = reqs.filter(r => r.status === 'fulfilled');
+
+  $('#stats-row').innerHTML = `
+    <div class="stat-box"><div class="stat-value" id="st-req">0</div><div class="stat-label">Requests</div></div>
+    <div class="stat-box"><div class="stat-value" id="st-inv">0</div><div class="stat-label">Inventory Items</div></div>
+    <div class="stat-box"><div class="stat-value" id="st-match">0</div><div class="stat-label">Total Matches</div></div>
+    <div class="stat-box"><div class="stat-value" id="st-rate">0%</div><div class="stat-label">Fulfillment Rate</div></div>
+  `;
+  animateNum('st-req', reqs.length);
+  animateNum('st-inv', inv.length);
+  animateNum('st-match', Store.data.matches.length);
+  const rate = reqs.length ? Math.round((fulfilled.length / reqs.length) * 100) : 0;
+  animateNum('st-rate', rate, '%');
+
+  drawLineChart('chart-volume', reqs);
+  drawBarChart('chart-keywords', [...reqs.flatMap(r => r.keywords), ...inv.flatMap(i => i.keywords)]);
+}
+
+function animateNum(id, target, suffix = '') {
+  const el = $(`#${id}`);
+  if (!el) return;
+  const from = parseInt(el.textContent) || 0;
+  const start = performance.now();
+  function tick(t) {
+    const p = Math.min((t - start) / 700, 1);
+    const ease = 1 - Math.pow(1 - p, 3);
+    el.textContent = Math.floor(from + (target - from) * ease) + suffix;
+    if (p < 1) requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+
+function drawLineChart(canvasId, data) {
+  const cvs = $(`#${canvasId}`), ctx = cvs.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  const rect = cvs.getBoundingClientRect();
+  cvs.width = rect.width * dpr; cvs.height = rect.height * dpr;
+  ctx.scale(dpr, dpr);
+  const w = rect.width, h = rect.height;
+  ctx.clearRect(0, 0, w, h);
+
+  const buckets = {};
+  data.forEach(d => { const l = new Date(d.created).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }); buckets[l] = (buckets[l] || 0) + 1; });
+  const labels = Object.keys(buckets), values = Object.values(buckets);
+  if (!values.length) { ctx.fillStyle = 'var(--wb-gray-light)'; ctx.font = '13px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('No data', w / 2, h / 2); return; }
+
+  const max = Math.max(...values);
+  const pad = 30, bw = (w - pad * 2) / Math.max(values.length - 1, 1);
+
+  ctx.strokeStyle = 'var(--wb-border)'; ctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) { const y = h - pad - (i / 4) * (h - pad * 2); ctx.beginPath(); ctx.moveTo(pad, y); ctx.lineTo(w - pad, y); ctx.stroke(); }
+
+  ctx.strokeStyle = 'var(--wb-gold)'; ctx.lineWidth = 2; ctx.beginPath();
+  values.forEach((v, i) => { const x = pad + i * bw, y = h - pad - (v / max) * (h - pad * 2); if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y); });
+  ctx.stroke();
+
+  ctx.fillStyle = 'var(--wb-gold-dim)'; ctx.beginPath();
+  values.forEach((v, i) => { const x = pad + i * bw, y = h - pad - (v / max) * (h - pad * 2); if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y); });
+  ctx.lineTo(pad + (values.length - 1) * bw, h - pad); ctx.lineTo(pad, h - pad); ctx.closePath(); ctx.fill();
+
+  values.forEach((v, i) => {
+    const x = pad + i * bw, y = h - pad - (v / max) * (h - pad * 2);
+    ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2); ctx.fillStyle = 'var(--wb-white)'; ctx.fill(); ctx.strokeStyle = 'var(--wb-gold)'; ctx.lineWidth = 2; ctx.stroke();
+  });
+}
+
+function drawBarChart(canvasId, keywords) {
+  const cvs = $(`#${canvasId}`), ctx = cvs.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  const rect = cvs.getBoundingClientRect();
+  cvs.width = rect.width * dpr; cvs.height = rect.height * dpr;
+  ctx.scale(dpr, dpr);
+  const w = rect.width, h = rect.height;
+  ctx.clearRect(0, 0, w, h);
+
+  const freq = {};
+  keywords.forEach(k => freq[k] = (freq[k] || 0) + 1);
+  const sorted = Object.entries(freq).sort((a, b) => b[1] - a[1]).slice(0, 8);
+  if (!sorted.length) return;
+
+  const max = sorted[0][1];
+  const pad = 30, barW = (w - pad * 2) / sorted.length * 0.6, gap = (w - pad * 2) / sorted.length;
+
+  sorted.forEach(([k, v], i) => {
+    const x = pad + i * gap + (gap - barW) / 2;
+    const barH = (v / max) * (h - pad * 2);
+    const y = h - pad - barH;
+    ctx.fillStyle = 'var(--wb-gold)'; ctx.globalAlpha = 0.85;
+    ctx.beginPath(); ctx.roundRect(x, y, barW, barH, 4); ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = 'var(--wb-gray)'; ctx.font = '11px sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText(k, x + barW / 2, h - 10);
+    ctx.fillStyle = 'var(--wb-black)'; ctx.fillText(v, x + barW / 2, y - 8);
+  });
+}
+
+/* ---------- ACTIONS ---------- */
+function fulfillRequest(id) {
+  Confirm.show('Fulfill this request?', 'It will be marked complete and moved to History.', () => {
+    const r = Store.data.requests.find(x => x.id === id);
+    if (r) { r.status = 'fulfilled'; r.pinned = false; r.updated_at = now(); Activity.log(`Fulfilled: ${r.customer}`); Toast.show('Fulfilled', `${r.customer}'s request completed.`); renderRequests(); renderHistory(); }
+  });
+}
+
+function reopenRequest(id) {
+  const r = Store.data.requests.find(x => x.id === id);
+  if (!r) return;
+  r.status = 'active';
+  r.updated_at = now();
+  Activity.log(`Reopened: ${r.customer}`);
+  Toast.show('Reopened', `${r.customer}'s request is active again.`);
+  renderRequests();
+  renderHistory();
+}
+
+function deleteRequest(id) {
+  Confirm.show('Delete Request?', 'This cannot be undone.', () => {
+    const r = Store.data.requests.find(x => x.id === id);
+    Store.data.requests = Store.data.requests.filter(x => x.id !== id);
+    Store.data.matches = Store.data.matches.filter(m => m.requestId !== id);
+    Activity.log(`Deleted request: ${r?.customer}`);
+    Toast.show('Deleted', 'Request removed.'); renderRequests(); renderMatches(); renderHistory();
+  });
+}
+
+function deleteInventory(id) {
+  Confirm.show('Delete Item?', 'This will also remove associated match alerts.', () => {
+    const i = Store.data.inventory.find(x => x.id === id);
+    Store.data.inventory = Store.data.inventory.filter(x => x.id !== id);
+    Store.data.matches = Store.data.matches.filter(m => m.itemId !== id);
+    Activity.log(`Deleted inventory: ${i?.name}`);
+    Toast.show('Deleted', 'Item removed.'); renderInventory(); renderMatches();
+  });
+}
+
+function togglePin(id) {
+  const r = Store.data.requests.find(x => x.id === id);
+  if (r) { r.pinned = !r.pinned; Activity.log(`${r.pinned ? 'Pinned' : 'Unpinned'}: ${r.customer}`); renderRequests(); }
+}
+
+function markRead(id) {
+  const m = Store.data.matches.find(x => x.id === id);
+  if (m) { m.read = true; renderMatches(); }
+}
+
+function dismissMatch(id) {
+  Store.data.matches = Store.data.matches.filter(x => x.id !== id);
+  renderMatches(); updateBadge();
+}
+
+function markAllRead() { Store.data.matches.forEach(m => m.read = true); renderMatches(); }
+function clearAllMatches() { Confirm.show('Clear all matches?', 'This removes your entire match history.', () => { Store.data.matches = []; renderMatches(); Toast.show('Cleared', 'Match history emptied.'); }); }
+
+function updateBadge() {
+  const unread = Store.data.matches.filter(m => !m.read).length;
+  const badge = $('#sidebar-badge');
+  badge.textContent = unread;
+  badge.style.display = unread ? 'inline-block' : 'none';
+}
+
+/* ---------- MODAL CONTROL ---------- */
+function openModal(type, editId = null) {
+  if (type === 'request') {
+    TagInput.clear('req-tags');
+    $('#req-customer').value = ''; $('#req-salesperson').value = ''; $('#req-desc').value = '';
+    $('#req-customer-email').value = ''; $('#req-salesperson-email').value = '';
+    $('#req-pin').checked = false; $('#req-edit-id').value = '';
+    $('#req-priority').value = 'medium'; $('#req-status').value = 'active';
+    $('#req-modal-title').textContent = 'New Request';
+    if (editId) {
+      const r = Store.data.requests.find(x => x.id === editId);
+      if (r) {
+        $('#req-customer').value = r.customer; $('#req-salesperson').value = r.salesperson; $('#req-desc').value = r.desc || '';
+        $('#req-customer-email').value = r.customerEmail || ''; $('#req-salesperson-email').value = r.salespersonEmail || '';
+        $('#req-pin').checked = r.pinned || false; $('#req-edit-id').value = editId;
+        $('#req-priority').value = r.priority || 'medium'; $('#req-status').value = r.status || 'active';
+        $('#req-modal-title').textContent = 'Edit Request';
+        TagInput.store['req-tags'] = [...r.keywords]; TagInput.render('req-tags');
+      }
+    }
+    $('#modal-request').classList.add('open');
+    setTimeout(() => $('#req-customer').focus(), 50);
+  } else {
+    TagInput.clear('inv-tags');
+    $('#inv-name').value = ''; $('#inv-desc').value = ''; $('#inv-category').value = ''; $('#inv-stock').value = '1';
+    $('#inv-edit-id').value = ''; $('#inv-modal-title').textContent = 'Add Inventory Item';
+    if (editId) {
+      const i = Store.data.inventory.find(x => x.id === editId);
+      if (i) {
+        $('#inv-name').value = i.name; $('#inv-desc').value = i.desc || ''; $('#inv-category').value = i.category || '';
+        $('#inv-stock').value = i.stock || 0; $('#inv-edit-id').value = editId;
+        $('#inv-modal-title').textContent = 'Edit Inventory Item';
+        TagInput.store['inv-tags'] = [...i.keywords]; TagInput.render('inv-tags');
+      }
+    }
+    $('#modal-inventory').classList.add('open');
+    setTimeout(() => $('#inv-name').focus(), 50);
+  }
+}
+
+function closeModal(type) { $(`#modal-${type}`).classList.remove('open'); }
+
+function saveRequest() {
+  const customer = $('#req-customer').value.trim();
+  const salesperson = $('#req-salesperson').value.trim();
+  const customerEmail = $('#req-customer-email').value.trim();
+  const salespersonEmail = $('#req-salesperson-email').value.trim();
+  const desc = $('#req-desc').value.trim();
+  const keywords = [...TagInput.store['req-tags']];
+  const pinned = $('#req-pin').checked;
+  const priority = $('#req-priority').value;
+  const status = $('#req-status').value;
+  const editId = $('#req-edit-id').value;
+  if (!customer || !salesperson) { Toast.show('Error', 'Customer and salesperson are required.'); return; }
+
+  if (editId) {
+    const r = Store.data.requests.find(x => x.id === editId);
+    if (r) { Object.assign(r, { customer, salesperson, customerEmail, salespersonEmail, desc, keywords, pinned, priority, status }); Activity.log(`Updated request: ${customer}`); Toast.show('Saved', 'Request updated.'); }
+  } else {
+    Store.data.requests.unshift({ id: uid(), customer, salesperson, customerEmail, salespersonEmail, desc, keywords, pinned, priority, status, created: now() });
+    Activity.log(`New request: ${customer} by ${salesperson}`);
+    Toast.show('Created', 'Request logged.');
+  }
+  closeModal('request'); renderRequests();
+}
+
+function saveInventory() {
+  const name = $('#inv-name').value.trim();
+  const desc = $('#inv-desc').value.trim();
+  const category = $('#inv-category').value.trim();
+  const stock = parseInt($('#inv-stock').value) || 0;
+  const keywords = [...TagInput.store['inv-tags']];
+  const editId = $('#inv-edit-id').value;
+  if (!name) { Toast.show('Error', 'Item name is required.'); return; }
+
+  if (editId) {
+    const i = Store.data.inventory.find(x => x.id === editId);
+    if (i) { Object.assign(i, { name, desc, category, stock, keywords }); Activity.log(`Updated inventory: ${name}`); Toast.show('Saved', 'Item updated.'); }
+  } else {
+    const item = { id: uid(), name, desc, category, stock, keywords, created: now(), isNew: true };
+    Store.data.inventory.unshift(item);
+    Activity.log(`New inventory: ${name}`);
+    checkMatches(item);
+    Toast.show('Added', `${name} added.`);
+  }
+  closeModal('inventory'); renderInventory();
+}
+
+/* ---------- SETTINGS PANELS ---------- */
+function showSettingPanel(id, el) {
+  $$('.settings-panel').forEach(p => p.style.display = 'none');
+  $(`#panel-${id}`).style.display = 'block';
+  $$('.settings-nav-item').forEach(n => n.classList.remove('active'));
+  el.classList.add('active');
+  if (id === 'audit') renderAuditLog();
+}
+
+function updateSetting(key, val) {
+  Store.data.settings[key] = parseInt(val);
+  if (key === 'sensitivity') $('#sens-val').textContent = (val * 10) + '%';
+}
+
+function toggleSetting(key, el) {
+  const on = !el.classList.contains('on');
+  el.classList.toggle('on', on);
+  Store.data.settings[key] = on;
+}
+
+function updateProfileDisplay() {
+  const nameEl = $('#profile-name-input');
+  const roleEl = $('#profile-role-select');
+  const name = nameEl ? nameEl.value.trim() : '';
+  const role = roleEl ? roleEl.value : 'Salesperson';
+  Store.data.settings.profileName = name;
+  Store.data.settings.profileRole = role;
+  const mini = $('#mini-profile-name');
+  const miniRole = $('#mini-profile-role');
+  const miniAv = $('#mini-avatar-initials');
+  if (mini) mini.textContent = name || 'Set up profile';
+  if (miniRole) miniRole.textContent = role;
+  if (miniAv) miniAv.textContent = name ? initials(name) : '?';
+}
+
+function renderAuditLog() {
+  const el = $('#audit-log-list');
+  if (!el) return;
+  const activity = Store.data.activity || [];
+  if (!activity.length) { el.innerHTML = '<p style="font-size:12px;color:var(--wb-gray-light);text-align:center;padding:20px;">No activity recorded yet.</p>'; return; }
+  el.innerHTML = activity.slice(0, 80).map(a => `
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;padding:10px 0;border-bottom:1px solid var(--wb-border-light);">
+      <span style="font-size:12px;color:var(--wb-charcoal);">${a.text}</span>
+      <span style="font-size:11px;color:var(--wb-gray-light);font-family:var(--font-mono);white-space:nowrap;margin-left:16px;">${timeAgo(a.time)}</span>
+    </div>`).join('');
+}
+
+function notifyMatchByEmail(req, item, score) {
+  if (!Store.data.settings.emailOnMatch) return;
+  const sp = req.salespersonEmail || req.salesperson;
+  const cust = req.customerEmail;
+  Activity.log(`Email alert → ${sp}: match "${item.name}" for ${req.customer} (${Math.round(score*100)}%)`);
+  Toast.show('Email Sent', `Match notification sent to ${sp}${cust && Store.data.settings.emailCustomer ? ' & ' + cust : ''}.`);
+}
+
+function setTheme(t) {
+  if (t === 'dark') {
+    document.documentElement.style.setProperty('--bg', '#0f0f13');
+    document.documentElement.style.setProperty('--surface', '#18181f');
+    document.documentElement.style.setProperty('--text', '#e8e8f0');
+  } else {
+    document.documentElement.style.setProperty('--bg', '#ffffff');
+    document.documentElement.style.setProperty('--surface', '#ffffff');
+    document.documentElement.style.setProperty('--text', '#1a1a1a');
+  }
+  Store.data.settings.theme = t;
+}
+
+function resetSettings() {
+  Confirm.show('Reset Settings?', 'All preferences will revert to defaults. Your data is safe.', () => {
+    Store.data.settings = { sensitivity: 3, fuzzy: true, autoArchive: false, theme: 'light', accent: '#c9a96e', accentHover: '#d4b87e', sound: true, desktopNotif: false };
+    applyAccent('#c9a96e', '#d4b87e');
+    $('#sens-slider').value = 3; $('#sens-val').textContent = '30%';
+    $('#tog-fuzzy').classList.add('on');
+    $('#tog-autoarchive').classList.remove('on');
+    Toast.show('Reset', 'Settings restored.');
+  });
+}
+
+function exportData(fmt) {
+  if (fmt === 'json') {
+    const blob = new Blob([JSON.stringify(Store.data, null, 2)], { type: 'application/json' });
+    download(blob, `bauman-backup-${new Date().toISOString().slice(0, 10)}.json`);
+  } else {
+    let csv = 'Type,ID,Name,Customer,Salesperson,Category,Stock,Description,Keywords,Status,Priority,Created\n';
+    Store.data.requests.forEach(r => csv += `Request,${r.id},"${r.name || ''}","${r.customer}","${r.salesperson}","${r.category || ''}",,"${r.desc || ''}","${r.keywords.join(';')}",${r.status},${r.priority},${r.created}\n`);
+    Store.data.inventory.forEach(i => csv += `Inventory,${i.id},"${i.name}","","","${i.category || ''}",${i.stock || 0},"${i.desc || ''}","${i.keywords.join(';')}",active,,${i.created}\n`);
+    download(new Blob([csv], { type: 'text/csv' }), `bauman-export-${new Date().toISOString().slice(0, 10)}.csv`);
+  }
+}
+
+function importData(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const data = JSON.parse(e.target.result);
+      if (data.requests) Store.data.requests = data.requests;
+      if (data.inventory) Store.data.inventory = data.inventory;
+      if (data.matches) Store.data.matches = data.matches;
+      if (data.settings) Store.data.settings = { ...Store.data.settings, ...data.settings };
+      if (Store.data.settings.accent) applyAccent(Store.data.settings.accent, Store.data.settings.accentHover);
+      Toast.show('Imported', `Loaded ${Store.data.requests.length} requests, ${Store.data.inventory.length} items.`);
+      renderAll();
+    } catch { Toast.show('Error', 'Invalid JSON file.'); }
+  };
+  reader.readAsText(file);
+  input.value = '';
+}
+
+function clearAllData() {
+  Confirm.show('Erase Everything?', 'ALL data will be permanently deleted. This is irreversible.', () => {
+    Store.data.requests = []; Store.data.inventory = []; Store.data.matches = []; Store.data.activity = [];
+    Toast.show('Erased', 'All data has been destroyed.'); renderAll();
+  });
+}
+
+function download(blob, name) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+/* ---------- TOAST & CONFIRM ---------- */
+const Toast = {
+  show(title, msg) {
+    const stack = $('#toast-stack');
+    const el = document.createElement('div');
+    el.className = 'toast';
+    el.innerHTML = `<button class="toast-close" onclick="this.parentElement.remove()">×</button><div class="toast-title">${title}</div><div class="toast-msg">${msg}</div>`;
+    stack.appendChild(el);
+    setTimeout(() => { el.classList.add('toast-out'); setTimeout(() => el.remove(), 250); }, 5000);
+  }
+};
+
+const Confirm = {
+  show(title, msg, cb) {
+    $('#confirm-msg').innerHTML = `<strong style="color:var(--wb-black);display:block;margin-bottom:6px;font-family:var(--font-serif);font-size:16px;">${title}</strong>${msg}`;
+    $('#modal-confirm').classList.add('open');
+    this._cb = cb;
+  }
+};
+
+function resolveConfirm(yes) {
+  $('#modal-confirm').classList.remove('open');
+  if (yes && Confirm._cb) Confirm._cb();
+}
+
+/* ---------- ACTIVITY ---------- */
+const Activity = {
+  log(text) { Store.data.activity.unshift({ text, time: now() }); if (Store.data.activity.length > 200) Store.data.activity.pop(); }
+};
+
+/* ---------- NAVIGATION ---------- */
+function navigate(page) {
+  Store.data.currentPage = page;
+  $$('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.page === page));
+  $$('.top-nav a').forEach(n => n.classList.toggle('active', n.dataset.page === page));
+  $$('.page').forEach(p => p.classList.toggle('active', p.id === `page-${page}`));
+  if (page === 'analytics') setTimeout(renderAnalytics, 50);
+  if (page === 'matches') renderMatches();
+  if (page === 'history') renderHistory();
+  if (page === 'inventory') {
+    setTimeout(() => {
+      let changed = false;
+      Store.data.inventory.forEach(i => { if (i.isNew) { i.isNew = false; changed = true; } });
+    }, 2000);
+  }
+}
+
+function setSearch(q) { $('#search-req').value = q; debouncedSearch(q); if (Store.data.currentPage !== 'requests') navigate('requests'); }
+function setSearchInv(q) { $('#search-inv').value = q; debouncedSearchInv(q); }
+
+let searchTimer, searchTimerInv, searchTimerHist;
+function debouncedSearch(v) { clearTimeout(searchTimer); searchTimer = setTimeout(() => { Store.data.search = v; renderRequests(); }, 150); }
+function debouncedSearchInv(v) { clearTimeout(searchTimerInv); searchTimerInv = setTimeout(() => { Store.data.searchInv = v; renderInventory(); }, 150); }
+function debouncedSearchHist(v) { clearTimeout(searchTimerHist); searchTimerHist = setTimeout(() => { Store.data.searchHist = v; renderHistory(); }, 150); }
+
+function emptyState(title, sub) {
+  return `<div class="wb-empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="9" x2="15" y2="15"/><line x1="15" y1="9" x2="9" y2="15"/></svg><h3>${title}</h3><p>${sub}</p></div>`;
+}
+
+function toggleTheme() {
+  const cur = Store.data.settings.theme;
+  const next = cur === 'light' ? 'dark' : 'light';
+  setTheme(next);
+  $('#theme-select').value = next;
+}
+
+/* ---------- KEYBOARD ---------- */
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') { closeModal('request'); closeModal('inventory'); $('#modal-confirm').classList.remove('open'); }
+  if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); $('#search-req').focus(); }
+});
+
+/* ---------- DEMO DATA ---------- */
+function seedData() {
+  const reqs = [
+    { customer: 'Sarah Johnson', salesperson: 'Jane Doe', desc: 'Vintage ruby necklace for anniversary gift. Budget ~$2,500.', keywords: ['ruby', 'vintage', 'necklace', 'red', 'anniversary'], priority: 'high' },
+    { customer: 'Michael Chen', salesperson: 'John Lee', desc: 'Gold heart pendant, 18k preferred. Chain included.', keywords: ['gold', 'heart', 'pendant', '18k'], priority: 'medium' },
+    { customer: 'Emma Williams', salesperson: 'Jane Doe', desc: 'Diamond engagement ring, round cut, platinum band. Size 6.', keywords: ['diamond', 'engagement', 'ring', 'platinum', 'round'], priority: 'urgent' },
+    { customer: 'Robert Davis', salesperson: 'Mike Smith', desc: 'Silver minimalist bracelet for men. Matte finish.', keywords: ['silver', 'bracelet', 'men', 'minimalist'], priority: 'low' },
+    { customer: 'Lisa Park', salesperson: 'Sarah Chen', desc: 'Emerald drop earrings, white gold setting.', keywords: ['emerald', 'earrings', 'white gold', 'drop'], priority: 'medium' },
+  ];
+  const inv = [
+    { name: 'Ruby Heart Pendant Necklace', desc: 'Stunning vintage-style ruby pendant with 14k gold chain. 1.2ct total weight.', category: 'Necklace', stock: 3, keywords: ['ruby', 'heart', 'pendant', 'vintage', 'necklace', 'gold', 'red'] },
+    { name: '18k Gold Heart Locket', desc: 'Beautiful 18k gold heart-shaped locket with engravable interior.', category: 'Pendant', stock: 1, keywords: ['gold', 'heart', '18k', 'locket', 'pendant'] },
+    { name: 'Platinum Diamond Solitaire Ring', desc: 'Classic round cut diamond on platinum band. GIA certified.', category: 'Ring', stock: 2, keywords: ['diamond', 'platinum', 'ring', 'round', 'solitaire', 'engagement'] },
+    { name: 'Silver Minimalist Cuff Bracelet', desc: 'Brushed sterling silver cuff. Adjustable fit.', category: 'Bracelet', stock: 5, keywords: ['silver', 'bracelet', 'men', 'minimalist', 'cuff'] },
+    { name: 'Emerald Drop Earrings', desc: 'Colombian emerald drops in 14k white gold. Leverback closure.', category: 'Earrings', stock: 2, keywords: ['emerald', 'earrings', 'white gold', 'drop'] },
+  ];
+
+  reqs.forEach((r, i) => Store.data.requests.push({ ...r, id: uid(), status: 'active', pinned: i < 2, created: new Date(Date.now() - 86400000 * (i + 1)).toISOString() }));
+  inv.forEach((it, i) => Store.data.inventory.push({ ...it, id: uid(), created: new Date(Date.now() - 3600000 * (i + 1)).toISOString(), isNew: i < 3 }));
+  Store.data.inventory.forEach(item => checkMatches(item));
+  Activity.log('Demo data seeded');
+  Activity.log('System initialized');
+}
+
+function renderAll() { renderRequests(); renderInventory(); renderMatches(); renderHistory(); updateBadge(); }
+
+/* ---------- BOOT ---------- */
+(function boot() {
+  Store.init();
+  if (!Store.data.requests.length) seedData();
+  if (Store.data.settings.accent) applyAccent(Store.data.settings.accent, Store.data.settings.accentHover);
+  $('#sens-slider').value = Store.data.settings.sensitivity;
+  $('#sens-val').textContent = (Store.data.settings.sensitivity * 10) + '%';
+  $('#tog-fuzzy').classList.toggle('on', Store.data.settings.fuzzy !== false);
+  $('#tog-autoarchive').classList.toggle('on', Store.data.settings.autoArchive === true);
+  $('#tog-sound').classList.toggle('on', Store.data.settings.sound !== false);
+  $('#tog-desktop').classList.toggle('on', Store.data.settings.desktopNotif === true);
+  $('#tog-email-match').classList.toggle('on', Store.data.settings.emailOnMatch === true);
+  $('#tog-email-customer').classList.toggle('on', Store.data.settings.emailCustomer === true);
+  $('#theme-select').value = Store.data.settings.theme;
+
+  // Profile
+  if (Store.data.settings.profileName) {
+    $('#profile-name-input').value = Store.data.settings.profileName;
+    $('#mini-profile-name').textContent = Store.data.settings.profileName;
+    $('#mini-avatar-initials').textContent = initials(Store.data.settings.profileName);
+  }
+  if (Store.data.settings.profileRole) {
+    $('#profile-role-select').value = Store.data.settings.profileRole;
+    $('#mini-profile-role').textContent = Store.data.settings.profileRole;
+  }
+  if (Store.data.settings.profileEmail) $('#profile-email-input').value = Store.data.settings.profileEmail;
+  if (Store.data.settings.emailReplyTo) $('#email-reply-to').value = Store.data.settings.emailReplyTo;
+
+  // Auto-fill salesperson from profile when opening new request
+  const _origOpenModal = openModal;
+  window.openModal = function(type, editId) {
+    _origOpenModal(type, editId);
+    if (type === 'request' && !editId && Store.data.settings.profileName) {
+      if (!$('#req-salesperson').value) $('#req-salesperson').value = Store.data.settings.profileName;
+      if (!$('#req-salesperson-email').value && Store.data.settings.profileEmail) $('#req-salesperson-email').value = Store.data.settings.profileEmail;
+    }
+  };
+
+  try {
+    const hex = Store.data.settings.accent;
+    const r = parseInt(hex.substr(1, 2), 16), g = parseInt(hex.substr(3, 2), 16), b = parseInt(hex.substr(5, 2), 16);
+    const hsv = rgbToHsv(r, g, b);
+    Wheel.state.h = hsv.h; Wheel.state.s = hsv.s; Wheel.state.v = hsv.v;
+    $('#val-slider').value = Math.round(hsv.v * 100);
+    $('#hex-display').value = hex.toUpperCase();
+  } catch (e) {}
+  Wheel.init();
+
+  renderAll();
+})();
+</script>
+</body>
+</html>
