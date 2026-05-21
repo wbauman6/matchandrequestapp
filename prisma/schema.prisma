@@ -14,6 +14,55 @@ datasource db {
   directUrl = env("POSTGRES_URL_NON_POOLING")
 }
 
+enum Priority {
+  low
+  medium
+  high
+  urgent
+}
+
+enum Status {
+  active
+  pending
+  fulfilled
+  archived
+}
+
+model Request {
+  id               String   @id @default(cuid())
+  shop             String
+  customerName     String
+  customerEmail    String?
+  salespersonName  String
+  salespersonEmail String
+  description      String?
+  keywords         String[]
+  priority         Priority @default(medium)
+  status           Status   @default(active)
+  pinned           Boolean  @default(false)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  matches          Match[]
+
+  @@index([shop])
+}
+
+model Match {
+  id              String   @id @default(cuid())
+  shop            String
+  requestId       String
+  productId       String
+  score           Float
+  matchedKeywords String[]
+  read            Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  request         Request  @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  @@unique([requestId, productId])
+  @@index([shop])
+  @@index([requestId])
+}
+
 model Session {
   id            String    @id
   shop          String
