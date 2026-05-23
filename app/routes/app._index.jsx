@@ -1,331 +1,583 @@
-import { useEffect } from "react";
-import { useFetcher } from "react-router";
-import { useAppBridge } from "@shopify/app-bridge-react";
+import { useState, useEffect } from "react";
+import { useLoaderData, Form, useNavigation, Link, useFetcher } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
+import prisma from "../db.server";
+import { runMatchesForRequest } from "../lib/matchRunner.server";
 
 export const loader = async ({ request }) => {
-  await authenticate.admin(request);
+  const { session } = await authenticate.admin(request);
+  const [requests, salespeople] = await Promise.all([
+    prisma.request.findMany({
+      where: { shop: session.shop, status: { in: ["active", "pending"] } },
+      include: { _count: { select: { matches: true } } },
+      orderBy: [{ pinned: "desc" }, { createdAt: "desc" }],
+    }),
+    prisma.salesperson.findMany({
+      where: { shop: session.shop, active: true },
+      orderBy: { name: "asc" },
+    }),
+  ]);
+  const hasAnthropicKey = Boolean(process.env.ANTHROPIC_API_KEY);
+  return { requests, salespeople, hasAnthropicKey };
+};
+
+export const action = async ({ request }) => {
+  const { session, admin } = await authenticate.admin(request);
+  const shop = session.shop;
+  const data = await request.formData();
+  const act = data.get("_action");
+
+  if (act === "create") {
+    const keywords = String(data.get("keywords") || "")
+      .split(",")
+      .map((k) => k.trim().toLowerCase())
+      .filter(Boolean);
+    const budgetStr = String(data.get("budget") || "").trim();
+    const budget = budgetStr ? parseFloat(budgetStr) : null;
+    const req = await prisma.request.create({
+      data: {
+        shop,
+        customerName: String(data.get("customerName")),
+        customerEmail: String(data.get("customerEmail") || "") || null,
+        salespersonName: String(data.get("salespersonName")),
+        salespersonEmail: String(data.get("salespersonEmail")),
+        description: String(data.get("description") || "") || null,
+        keywords,
+        budget: Number.isFinite(budget) ? budget : null,
+        priority: String(data.get("priority") || "medium"),
+        pinned: data.get("pinned") === "on",
+      },
+    });
+    await runMatchesForRequest(admin, req);
+    return { created: true };
+  }
+
+  if (act === "delete") {
+    await prisma.request.delete({ where: { id: String(data.get("id")) } });
+  }
+
+  if (act === "pin") {
+    const r = await prisma.request.findUnique({ where: { id: String(data.get("id")) } });
+    await prisma.request.update({ where: { id: r.id }, data: { pinned: !r.pinned } });
+  }
+
+  if (act === "status") {
+    await prisma.request.update({
+      where: { id: String(data.get("id")) },
+      data: { status: String(data.get("status")) },
+    });
+  }
 
   return null;
 };
 
-export const action = async ({ request }) => {
-  const { admin } = await authenticate.admin(request);
-  const color = ["Red", "Orange", "Yellow", "Green"][
-    Math.floor(Math.random() * 4)
-  ];
-  const response = await admin.graphql(
-    `#graphql
-      mutation populateProduct($product: ProductCreateInput!) {
-        productCreate(product: $product) {
-          product {
-            id
-            title
-            handle
-            status
-            variants(first: 10) {
-              edges {
-                node {
-                  id
-                  price
-                  barcode
-                  createdAt
-                }
-              }
-            }
-            demoInfo: metafield(namespace: "$app", key: "demo_info") {
-              jsonValue
-            }
-          }
-        }
-      }`,
-    {
-      variables: {
-        product: {
-          title: `${color} Snowboard`,
-          metafields: [
-            {
-              namespace: "$app",
-              key: "demo_info",
-              value: "Created by React Router Template",
-            },
-          ],
-        },
-      },
-    },
-  );
-  const responseJson = await response.json();
-  const product = responseJson.data.productCreate.product;
-  const variantId = product.variants.edges[0].node.id;
-  const variantResponse = await admin.graphql(
-    `#graphql
-    mutation shopifyReactRouterTemplateUpdateVariant($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
-      productVariantsBulkUpdate(productId: $productId, variants: $variants) {
-        productVariants {
-          id
-          price
-          barcode
-          createdAt
-        }
-      }
-    }`,
-    {
-      variables: {
-        productId: product.id,
-        variants: [{ id: variantId, price: "100.00" }],
-      },
-    },
-  );
-  const variantResponseJson = await variantResponse.json();
-  const metaobjectResponse = await admin.graphql(
-    `#graphql
-    mutation shopifyReactRouterTemplateUpsertMetaobject($handle: MetaobjectHandleInput!, $metaobject: MetaobjectUpsertInput!) {
-      metaobjectUpsert(handle: $handle, metaobject: $metaobject) {
-        metaobject {
-          id
-          handle
-          title: field(key: "title") {
-            jsonValue
-          }
-          description: field(key: "description") {
-            jsonValue
-          }
-        }
-        userErrors {
-          field
-          message
-        }
-      }
-    }`,
-    {
-      variables: {
-        handle: {
-          type: "$app:example",
-          handle: "demo-entry",
-        },
-        metaobject: {
-          fields: [
-            { key: "title", value: "Demo Entry" },
-            {
-              key: "description",
-              value:
-                "This metaobject was created by the Shopify app template to demonstrate the metaobject API.",
-            },
-          ],
-        },
-      },
-    },
-  );
-  const metaobjectResponseJson = await metaobjectResponse.json();
-
-  return {
-    product: responseJson.data.productCreate.product,
-    variant: variantResponseJson.data.productVariantsBulkUpdate.productVariants,
-    metaobject: metaobjectResponseJson.data.metaobjectUpsert.metaobject,
-  };
+const PRIORITY_COLOR = {
+  urgent: "#d72c0d",
+  high: "#e18b00",
+  medium: "#005bd3",
+  low: "#616161",
 };
 
-export default function Index() {
-  const fetcher = useFetcher();
-  const shopify = useAppBridge();
-  const isLoading =
-    ["loading", "submitting"].includes(fetcher.state) &&
-    fetcher.formMethod === "POST";
+function RequestRow({ r }) {
+  return (
+    <tr style={{ borderBottom: "1px solid #e1e3e5" }}>
+      <td style={{ padding: "12px 16px" }}>
+        <div style={{ fontWeight: 600 }}>
+          {r.pinned && <span title="Pinned" style={{ marginRight: 4 }}>📌</span>}
+          <Link
+            to={`/app/requests/${r.id}`}
+            style={{ color: "#005bd3", textDecoration: "none" }}
+          >
+            {r.customerName}
+          </Link>
+        </div>
+        {r.customerEmail && (
+          <div style={{ fontSize: 12, color: "#6d7175" }}>{r.customerEmail}</div>
+        )}
+      </td>
+      <td style={{ padding: "12px 16px", color: "#6d7175", fontSize: 13 }}>
+        {r.salespersonName}
+      </td>
+      <td style={{ padding: "12px 16px", fontSize: 13, color: "#212326" }}>
+        {r.budget != null ? `$${r.budget.toLocaleString()}` : <span style={{ color: "#c9cccf" }}>—</span>}
+      </td>
+      <td style={{ padding: "12px 16px" }}>
+        <span
+          style={{
+            fontSize: 11,
+            fontWeight: 600,
+            textTransform: "uppercase",
+            letterSpacing: "0.5px",
+            color: PRIORITY_COLOR[r.priority] || "#616161",
+          }}
+        >
+          {r.priority}
+        </span>
+      </td>
+      <td style={{ padding: "12px 16px", fontSize: 12, color: "#6d7175", maxWidth: 200 }}>
+        {r.keywords.slice(0, 4).join(", ")}
+        {r.keywords.length > 4 && " …"}
+      </td>
+      <td style={{ padding: "12px 16px", textAlign: "center" }}>
+        {r._count.matches > 0 ? (
+          <Link
+            to={`/app/requests/${r.id}`}
+            style={{
+              background: "#e3f1df",
+              color: "#1a7a4a",
+              fontWeight: 700,
+              fontSize: 12,
+              padding: "2px 10px",
+              borderRadius: 12,
+              textDecoration: "none",
+            }}
+          >
+            {r._count.matches}
+          </Link>
+        ) : (
+          <span style={{ color: "#c9cccf" }}>—</span>
+        )}
+      </td>
+      <td style={{ padding: "12px 16px" }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <Form method="post">
+            <input type="hidden" name="_action" value="pin" />
+            <input type="hidden" name="id" value={r.id} />
+            <button type="submit" style={actionBtn}>
+              {r.pinned ? "Unpin" : "Pin"}
+            </button>
+          </Form>
+          <Form method="post">
+            <input type="hidden" name="_action" value="status" />
+            <input type="hidden" name="id" value={r.id} />
+            <input type="hidden" name="status" value="fulfilled" />
+            <button type="submit" style={{ ...actionBtn, color: "#1a7a4a" }}>
+              Fulfill
+            </button>
+          </Form>
+          <Form method="post">
+            <input type="hidden" name="_action" value="status" />
+            <input type="hidden" name="id" value={r.id} />
+            <input type="hidden" name="status" value="archived" />
+            <button type="submit" style={actionBtn}>
+              Archive
+            </button>
+          </Form>
+          <Form method="post">
+            <input type="hidden" name="_action" value="delete" />
+            <input type="hidden" name="id" value={r.id} />
+            <button
+              type="submit"
+              style={{ ...actionBtn, color: "#d72c0d" }}
+              onClick={(e) => {
+                if (!confirm("Delete this request and all its matches?")) e.preventDefault();
+              }}
+            >
+              Delete
+            </button>
+          </Form>
+        </div>
+      </td>
+    </tr>
+  );
+}
 
-  useEffect(() => {
-    if (fetcher.data?.product?.id) {
-      shopify.toast.show("Product created");
+const actionBtn = {
+  background: "none",
+  border: "none",
+  cursor: "pointer",
+  fontSize: 12,
+  color: "#616161",
+  padding: "2px 4px",
+  borderRadius: 4,
+};
+
+const inputStyle = {
+  width: "100%",
+  padding: "8px 12px",
+  border: "1px solid #c9cccf",
+  borderRadius: 6,
+  fontSize: 14,
+  boxSizing: "border-box",
+};
+
+const labelStyle = { fontSize: 12, fontWeight: 600, marginBottom: 4, display: "block" };
+
+/** Chip/pill tag input. Press Enter or comma to add; Backspace removes last. */
+function TagInput({ tags, onChange }) {
+  const [inputVal, setInputVal] = useState("");
+
+  const commit = (raw) => {
+    const cleaned = raw.trim().toLowerCase().replace(/,/g, "");
+    if (cleaned && !tags.includes(cleaned)) onChange([...tags, cleaned]);
+    setInputVal("");
+  };
+
+  const remove = (tag) => onChange(tags.filter((t) => t !== tag));
+
+  const handleKeyDown = (e) => {
+    if (e.key === "Enter" || e.key === ",") {
+      e.preventDefault();
+      commit(inputVal);
+    } else if (e.key === "Backspace" && inputVal === "" && tags.length > 0) {
+      remove(tags[tags.length - 1]);
     }
-  }, [fetcher.data?.product?.id, shopify]);
-  const generateProduct = () => fetcher.submit({}, { method: "POST" });
+  };
+
+  const handleBlur = () => {
+    if (inputVal.trim()) commit(inputVal);
+  };
 
   return (
-    <s-page heading="Shopify app template">
-      <s-button slot="primary-action" onClick={generateProduct}>
-        Generate a product
+    <div
+      onClick={(e) => e.currentTarget.querySelector("input")?.focus()}
+      style={{
+        display: "flex",
+        flexWrap: "wrap",
+        gap: 6,
+        padding: "6px 10px",
+        border: "1px solid #c9cccf",
+        borderRadius: 6,
+        minHeight: 40,
+        alignItems: "center",
+        cursor: "text",
+        background: "#fff",
+      }}
+    >
+      {tags.map((tag) => (
+        <span
+          key={tag}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 5,
+            background: "#f1f2f3",
+            borderRadius: 20,
+            padding: "3px 10px 3px 12px",
+            fontSize: 13,
+            color: "#212326",
+          }}
+        >
+          {tag}
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); remove(tag); }}
+            style={{
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              padding: 0,
+              lineHeight: 1,
+              color: "#6d7175",
+              fontSize: 15,
+              display: "flex",
+              alignItems: "center",
+            }}
+            aria-label={`Remove ${tag}`}
+          >
+            ×
+          </button>
+        </span>
+      ))}
+      <input
+        value={inputVal}
+        onChange={(e) => setInputVal(e.target.value)}
+        onKeyDown={handleKeyDown}
+        onBlur={handleBlur}
+        placeholder={tags.length === 0 ? "Type a keyword and press Enter…" : ""}
+        style={{
+          border: "none",
+          outline: "none",
+          fontSize: 14,
+          flex: 1,
+          minWidth: 120,
+          background: "transparent",
+          padding: "2px 0",
+        }}
+      />
+    </div>
+  );
+}
+
+export default function RequestsPage() {
+  const { requests, salespeople, hasAnthropicKey } = useLoaderData();
+  const nav = useNavigation();
+  const suggestFetcher = useFetcher();
+  const [showForm, setShowForm] = useState(false);
+  const [description, setDescription] = useState("");
+  const [tags, setTags] = useState([]);
+  const [salespersonId, setSalespersonId] = useState("");
+  const [useManualSp, setUseManualSp] = useState(salespeople.length === 0);
+  const submitting = nav.state === "submitting";
+  const suggesting = suggestFetcher.state !== "idle";
+
+  // Merge AI suggestions into existing tags (no dupes).
+  useEffect(() => {
+    if (suggestFetcher.data?.keywords?.length) {
+      setTags((prev) => {
+        const next = [...prev];
+        for (const kw of suggestFetcher.data.keywords) {
+          if (!next.includes(kw)) next.push(kw);
+        }
+        return next;
+      });
+    }
+  }, [suggestFetcher.data]);
+
+  const selectedSp = salespeople.find((s) => s.id === salespersonId);
+
+  const handleSuggest = () => {
+    if (!description.trim()) return;
+    const fd = new FormData();
+    fd.append("description", description);
+    suggestFetcher.submit(fd, { method: "post", action: "/api/suggest-keywords" });
+  };
+
+  const resetForm = () => {
+    setDescription("");
+    setTags([]);
+    setSalespersonId("");
+    setUseManualSp(salespeople.length === 0);
+  };
+
+  return (
+    <s-page heading="Customer Requests">
+      <s-button slot="primary-action" onClick={() => setShowForm((s) => !s)}>
+        {showForm ? "Cancel" : "+ New Request"}
       </s-button>
 
-      <s-section heading="Congrats on creating a new Shopify app 🎉">
-        <s-paragraph>
-          This embedded app template uses{" "}
-          <s-link
-            href="https://shopify.dev/docs/apps/tools/app-bridge"
-            target="_blank"
+      {showForm && (
+        <s-section heading="New Request">
+          <Form
+            method="post"
+            onSubmit={() => {
+              if (!submitting) {
+                resetForm();
+                setShowForm(false);
+              }
+            }}
           >
-            App Bridge
-          </s-link>{" "}
-          interface examples like an{" "}
-          <s-link href="/app/additional">additional page in the app nav</s-link>
-          , as well as an{" "}
-          <s-link
-            href="https://shopify.dev/docs/api/admin-graphql"
-            target="_blank"
-          >
-            Admin GraphQL
-          </s-link>{" "}
-          mutation demo, to provide a starting point for app development.
-        </s-paragraph>
-      </s-section>
-      <s-section heading="Get started with products">
-        <s-paragraph>
-          Generate a product with GraphQL and get the JSON output for that
-          product. Learn more about the{" "}
-          <s-link
-            href="https://shopify.dev/docs/api/admin-graphql/latest/mutations/productCreate"
-            target="_blank"
-          >
-            productCreate
-          </s-link>{" "}
-          mutation in our API references. Includes a product{" "}
-          <s-link
-            href="https://shopify.dev/docs/apps/build/custom-data/metafields"
-            target="_blank"
-          >
-            metafield
-          </s-link>{" "}
-          and{" "}
-          <s-link
-            href="https://shopify.dev/docs/apps/build/custom-data/metaobjects"
-            target="_blank"
-          >
-            metaobject
-          </s-link>
-          .
-        </s-paragraph>
-        <s-stack direction="inline" gap="base">
-          <s-button
-            onClick={generateProduct}
-            {...(isLoading ? { loading: true } : {})}
-          >
-            Generate a product
-          </s-button>
-          {fetcher.data?.product && (
-            <s-button
-              onClick={() => {
-                shopify.intents.invoke?.("edit:shopify/Product", {
-                  value: fetcher.data?.product?.id,
-                });
+            <input type="hidden" name="_action" value="create" />
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
+              <div>
+                <label style={labelStyle}>Customer Name *</label>
+                <input name="customerName" required style={inputStyle} placeholder="Sarah Johnson" />
+              </div>
+              <div>
+                <label style={labelStyle}>Customer Email</label>
+                <input name="customerEmail" type="email" style={inputStyle} placeholder="customer@email.com" />
+              </div>
+
+              {salespeople.length > 0 && !useManualSp ? (
+                <>
+                  <div style={{ gridColumn: "span 2" }}>
+                    <label style={labelStyle}>
+                      Salesperson *{" "}
+                      <button
+                        type="button"
+                        onClick={() => setUseManualSp(true)}
+                        style={{
+                          background: "none",
+                          border: "none",
+                          color: "#005bd3",
+                          fontSize: 11,
+                          cursor: "pointer",
+                          padding: 0,
+                          marginLeft: 6,
+                        }}
+                      >
+                        (enter manually)
+                      </button>
+                    </label>
+                    <select
+                      value={salespersonId}
+                      onChange={(e) => setSalespersonId(e.target.value)}
+                      required
+                      style={inputStyle}
+                    >
+                      <option value="">Choose a salesperson…</option>
+                      {salespeople.map((sp) => (
+                        <option key={sp.id} value={sp.id}>
+                          {sp.name} ({sp.email})
+                        </option>
+                      ))}
+                    </select>
+                    <input type="hidden" name="salespersonName" value={selectedSp?.name || ""} />
+                    <input type="hidden" name="salespersonEmail" value={selectedSp?.email || ""} />
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div>
+                    <label style={labelStyle}>
+                      Salesperson Name *
+                      {salespeople.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setUseManualSp(false)}
+                          style={{
+                            background: "none",
+                            border: "none",
+                            color: "#005bd3",
+                            fontSize: 11,
+                            cursor: "pointer",
+                            padding: 0,
+                            marginLeft: 6,
+                          }}
+                        >
+                          (use saved list)
+                        </button>
+                      )}
+                    </label>
+                    <input name="salespersonName" required style={inputStyle} placeholder="Jane Doe" />
+                  </div>
+                  <div>
+                    <label style={labelStyle}>Salesperson Email *</label>
+                    <input name="salespersonEmail" type="email" required style={inputStyle} placeholder="staff@wbj.com" />
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                <label style={{ ...labelStyle, marginBottom: 0 }}>Description</label>
+                {hasAnthropicKey && (
+                  <button
+                    type="button"
+                    onClick={handleSuggest}
+                    disabled={suggesting || !description.trim()}
+                    style={{
+                      background: "none",
+                      border: "1px solid #c9cccf",
+                      borderRadius: 4,
+                      padding: "4px 10px",
+                      fontSize: 12,
+                      cursor: suggesting || !description.trim() ? "not-allowed" : "pointer",
+                      color: "#414547",
+                      opacity: suggesting || !description.trim() ? 0.6 : 1,
+                    }}
+                  >
+                    {suggesting ? "Suggesting…" : "✨ Suggest keywords"}
+                  </button>
+                )}
+              </div>
+              <textarea
+                name="description"
+                rows={3}
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                style={{ ...inputStyle, resize: "vertical" }}
+                placeholder="What is the customer looking for? (e.g. 'art deco engagement ring with sapphire')"
+              />
+              {suggestFetcher.data?.error && (
+                <div style={{ fontSize: 12, color: "#d72c0d", marginTop: 4 }}>
+                  {suggestFetcher.data.error}
+                </div>
+              )}
+            </div>
+
+            {/* Hidden input carries tags as comma-separated string to the action */}
+            <input type="hidden" name="keywords" value={tags.join(", ")} />
+
+            <div style={{ marginBottom: 16 }}>
+              <label style={labelStyle}>Keywords</label>
+              <TagInput tags={tags} onChange={setTags} />
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 100px", gap: 16, marginBottom: 20 }}>
+              <div>
+                <label style={labelStyle}>Budget ($)</label>
+                <input
+                  name="budget"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  style={inputStyle}
+                  placeholder="2500"
+                />
+              </div>
+              <div>
+                <label style={labelStyle}>Priority</label>
+                <select name="priority" style={inputStyle}>
+                  <option value="low">Low</option>
+                  <option value="medium" defaultValue>Medium</option>
+                  <option value="high">High</option>
+                  <option value="urgent">Urgent</option>
+                </select>
+              </div>
+              <div style={{ paddingTop: 20, display: "flex", alignItems: "center", gap: 8 }}>
+                <input type="checkbox" name="pinned" id="pinned-check" />
+                <label htmlFor="pinned-check" style={{ fontSize: 13, cursor: "pointer" }}>
+                  Pin
+                </label>
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={submitting}
+              style={{
+                background: "#008060",
+                color: "#fff",
+                border: "none",
+                borderRadius: 6,
+                padding: "10px 24px",
+                fontSize: 14,
+                fontWeight: 600,
+                cursor: submitting ? "not-allowed" : "pointer",
+                opacity: submitting ? 0.7 : 1,
               }}
-              target="_blank"
-              variant="tertiary"
             >
-              Edit product
-            </s-button>
-          )}
-        </s-stack>
-        {fetcher.data?.product && (
-          <s-section heading="productCreate mutation">
-            <s-stack direction="block" gap="base">
-              <s-box
-                padding="base"
-                borderWidth="base"
-                borderRadius="base"
-                background="subdued"
-              >
-                <pre style={{ margin: 0 }}>
-                  <code>{JSON.stringify(fetcher.data.product, null, 2)}</code>
-                </pre>
-              </s-box>
+              {submitting ? "Saving…" : "Save Request"}
+            </button>
+          </Form>
+        </s-section>
+      )}
 
-              <s-heading>productVariantsBulkUpdate mutation</s-heading>
-              <s-box
-                padding="base"
-                borderWidth="base"
-                borderRadius="base"
-                background="subdued"
-              >
-                <pre style={{ margin: 0 }}>
-                  <code>{JSON.stringify(fetcher.data.variant, null, 2)}</code>
-                </pre>
-              </s-box>
-
-              <s-heading>metaobjectUpsert mutation</s-heading>
-              <s-box
-                padding="base"
-                borderWidth="base"
-                borderRadius="base"
-                background="subdued"
-              >
-                <pre style={{ margin: 0 }}>
-                  <code>
-                    {JSON.stringify(fetcher.data.metaobject, null, 2)}
-                  </code>
-                </pre>
-              </s-box>
-            </s-stack>
-          </s-section>
+      <s-section heading={`Active Requests (${requests.length})`}>
+        {requests.length === 0 ? (
+          <p style={{ color: "#6d7175", textAlign: "center", padding: "40px 0", margin: 0 }}>
+            No active requests. Click &quot;+ New Request&quot; to get started.
+          </p>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
+              <thead>
+                <tr style={{ background: "#f6f6f7", textAlign: "left" }}>
+                  {["Customer", "Salesperson", "Budget", "Priority", "Keywords", "Matches", "Actions"].map(
+                    (h) => (
+                      <th
+                        key={h}
+                        style={{
+                          padding: "10px 16px",
+                          fontSize: 11,
+                          fontWeight: 600,
+                          textTransform: "uppercase",
+                          letterSpacing: "0.5px",
+                          color: "#6d7175",
+                          textAlign: h === "Matches" ? "center" : "left",
+                        }}
+                      >
+                        {h}
+                      </th>
+                    ),
+                  )}
+                </tr>
+              </thead>
+              <tbody>
+                {requests.map((r) => (
+                  <RequestRow key={r.id} r={r} />
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
-      </s-section>
-
-      <s-section slot="aside" heading="App template specs">
-        <s-paragraph>
-          <s-text>Framework: </s-text>
-          <s-link href="https://reactrouter.com/" target="_blank">
-            React Router
-          </s-link>
-        </s-paragraph>
-        <s-paragraph>
-          <s-text>Interface: </s-text>
-          <s-link
-            href="https://shopify.dev/docs/api/app-home/using-polaris-components"
-            target="_blank"
-          >
-            Polaris web components
-          </s-link>
-        </s-paragraph>
-        <s-paragraph>
-          <s-text>API: </s-text>
-          <s-link
-            href="https://shopify.dev/docs/api/admin-graphql"
-            target="_blank"
-          >
-            GraphQL
-          </s-link>
-        </s-paragraph>
-        <s-paragraph>
-          <s-text>Custom data: </s-text>
-          <s-link
-            href="https://shopify.dev/docs/apps/build/custom-data"
-            target="_blank"
-          >
-            Metafields &amp; metaobjects
-          </s-link>
-        </s-paragraph>
-        <s-paragraph>
-          <s-text>Database: </s-text>
-          <s-link href="https://www.prisma.io/" target="_blank">
-            Prisma
-          </s-link>
-        </s-paragraph>
-      </s-section>
-
-      <s-section slot="aside" heading="Next steps">
-        <s-unordered-list>
-          <s-list-item>
-            Build an{" "}
-            <s-link
-              href="https://shopify.dev/docs/apps/getting-started/build-app-example"
-              target="_blank"
-            >
-              example app
-            </s-link>
-          </s-list-item>
-          <s-list-item>
-            Explore Shopify&apos;s API with{" "}
-            <s-link
-              href="https://shopify.dev/docs/apps/tools/graphiql-admin-api"
-              target="_blank"
-            >
-              GraphiQL
-            </s-link>
-          </s-list-item>
-        </s-unordered-list>
       </s-section>
     </s-page>
   );
 }
 
-export const headers = (headersArgs) => {
-  return boundary.headers(headersArgs);
-};
+export const headers = (h) => boundary.headers(h);
