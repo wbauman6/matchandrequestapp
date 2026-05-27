@@ -6,7 +6,7 @@ import prisma from "../db.server";
 export const loader = async ({ request }) => {
   const { session } = await authenticate.admin(request);
   const matches = await prisma.match.findMany({
-    where: { shop: session.shop },
+    where: { shop: session.shop, declined: false },
     include: {
       request: {
         select: {
@@ -38,7 +38,7 @@ export const action = async ({ request }) => {
 
   if (act === "mark-all-read") {
     await prisma.match.updateMany({
-      where: { shop: session.shop, read: false },
+      where: { shop: session.shop, read: false, declined: false },
       data: { read: true },
     });
   }

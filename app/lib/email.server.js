@@ -31,7 +31,7 @@ function header(title) {
 function footer() {
   return `
     <div style="padding:16px 32px;background:#f6f6f7;font-size:12px;color:#6d7175;">
-      Sent by the Walter Bauman Jewelers match &amp; request app.
+      Sent by the Match &amp; Request app.
     </div>`;
 }
 
@@ -129,6 +129,118 @@ export async function sendMatchSummaryEmail({
     from: FROM,
     to: salespersonEmail,
     subject: `${count} match${count > 1 ? "es" : ""} found for ${customerName}`,
+    html,
+  });
+}
+
+/**
+ * Recurring reminder email — sent by the daily cron job when a request has
+ * unread matches and enough time has passed (2 days for urgent, 7 for normal).
+ */
+export async function sendReminderEmail({
+  salespersonName,
+  salespersonEmail,
+  customerName,
+  priority,
+  budget,
+  matches, // array of { productTitle, productPrice, productImage, score, matchedKeywords }
+  shop,
+}) {
+  const count = matches.length;
+  const budgetNote = budget != null ? ` (budget: $${budget.toLocaleString()})` : "";
+  const appUrl = `https://${shop}/admin/apps/${process.env.SHOPIFY_API_KEY}`;
+  const isUrgent = priority === "urgent";
+
+  const rows = matches
+    .sort((a, b) => b.score - a.score)
+    .map(productRow)
+    .join("");
+
+  const urgentBanner = isUrgent
+    ? `<div style="background:#fdf3f1;border-left:4px solid #d72c0d;padding:10px 16px;
+                  margin-bottom:20px;font-size:13px;color:#d72c0d;font-weight:600;">
+         URGENT — Action needed within 2 days
+       </div>`
+    : "";
+
+  const html = shell(`
+    ${header(`Reminder: ${count} match${count > 1 ? "es" : ""} awaiting review`)}
+    <div style="padding:24px 32px;">
+      ${urgentBanner}
+      <p style="margin:0 0 20px;font-size:15px;">
+        Hi <strong>${salespersonName}</strong>, this is a reminder that
+        <strong>${customerName}</strong>'s request${budgetNote} still has
+        <strong>${count}</strong> unreviewed match${count > 1 ? "es" : ""}.
+      </p>
+      <table style="width:100%;border-collapse:collapse;margin-bottom:24px;">
+        <thead>
+          <tr style="background:#f6f6f7;text-align:left;">
+            <th style="padding:10px 12px;font-size:11px;color:#6d7175;font-weight:600;text-transform:uppercase;"></th>
+            <th style="padding:10px 12px;font-size:11px;color:#6d7175;font-weight:600;text-transform:uppercase;">Product</th>
+            <th style="padding:10px 12px;font-size:11px;color:#6d7175;font-weight:600;text-transform:uppercase;">Match</th>
+            <th style="padding:10px 12px;font-size:11px;color:#6d7175;font-weight:600;text-transform:uppercase;">Keywords</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <a href="${appUrl}"
+         style="display:inline-block;background:#008060;color:#fff;
+                text-decoration:none;padding:12px 24px;border-radius:6px;
+                font-weight:600;font-size:14px;">
+        Review matches →
+      </a>
+    </div>
+    ${footer()}`);
+
+  const resend = getClient();
+  await resend.emails.send({
+    from: FROM,
+    to: salespersonEmail,
+    subject: `${isUrgent ? "⚠ URGENT — " : ""}${count} match${count > 1 ? "es" : ""} still pending for ${customerName}`,
+    html,
+  });
+}
+
+/**
+ * Note / internal message email — sent when a staff member adds a note and
+ * ticks "notify salesperson".
+ */
+export async function sendNoteEmail({
+  salespersonName,
+  salespersonEmail,
+  customerName,
+  authorName,
+  body,
+  shop,
+}) {
+  const appUrl = `https://${shop}/admin/apps/${process.env.SHOPIFY_API_KEY}`;
+
+  const html = shell(`
+    ${header(`Note added for ${customerName}`)}
+    <div style="padding:24px 32px;">
+      <p style="margin:0 0 20px;font-size:15px;">
+        Hi <strong>${salespersonName}</strong>,
+        <strong>${authorName}</strong> left a note on
+        <strong>${customerName}</strong>'s request.
+      </p>
+      <div style="background:#f6f6f7;border-left:4px solid #008060;
+                  border-radius:0 6px 6px 0;padding:14px 18px;
+                  font-size:14px;color:#212326;white-space:pre-wrap;
+                  margin-bottom:24px;">${body}</div>
+      <a href="${appUrl}"
+         style="display:inline-block;background:#008060;color:#fff;
+                text-decoration:none;padding:12px 24px;border-radius:6px;
+                font-weight:600;font-size:14px;">
+        View in app →
+      </a>
+    </div>
+    ${footer()}`);
+
+  const resend = getClient();
+  await resend.emails.send({
+    from: FROM,
+    to: salespersonEmail,
+    subject: `Note from ${authorName} on ${customerName}'s request`,
     html,
   });
 }

@@ -10,7 +10,7 @@ export const loader = async ({ request }) => {
   const [requests, salespeople] = await Promise.all([
     prisma.request.findMany({
       where: { shop: session.shop, status: { in: ["active", "pending"] } },
-      include: { _count: { select: { matches: true } } },
+      include: { _count: { select: { matches: { where: { declined: false } } } } },
       orderBy: [{ pinned: "desc" }, { createdAt: "desc" }],
     }),
     prisma.salesperson.findMany({
@@ -40,6 +40,7 @@ export const action = async ({ request }) => {
         shop,
         customerName: String(data.get("customerName")),
         customerEmail: String(data.get("customerEmail") || "") || null,
+        customerId: String(data.get("customerId") || "") || null,
         salespersonName: String(data.get("salespersonName")),
         salespersonEmail: String(data.get("salespersonEmail")),
         description: String(data.get("description") || "") || null,
@@ -74,9 +75,7 @@ export const action = async ({ request }) => {
 
 const PRIORITY_COLOR = {
   urgent: "#d72c0d",
-  high: "#e18b00",
-  medium: "#005bd3",
-  low: "#616161",
+  normal: "#616161",
 };
 
 function RequestRow({ r }) {
@@ -203,6 +202,224 @@ const inputStyle = {
 };
 
 const labelStyle = { fontSize: 12, fontWeight: 600, marginBottom: 4, display: "block" };
+
+/**
+ * Customer search with Shopify customer autocomplete (name, email, or phone).
+ * Selecting a result fills name/email/phone hidden fields and stores the GID.
+ * Clearing the selection goes back to manual entry.
+ */
+function CustomerSection({ inputStyle, labelStyle }) {
+  const fetcher = useFetcher();
+  const [query, setQuery] = useState("");
+  const [selected, setSelected] = useState(null);
+  const [showDropdown, setShowDropdown] = useState(false);
+
+  // Debounced search — fires 300 ms after the user stops typing
+  useEffect(() => {
+    if (selected || query.trim().length < 2) {
+      setShowDropdown(false);
+      return;
+    }
+    const timer = setTimeout(() => {
+      fetcher.load(`/api/customers/search?q=${encodeURIComponent(query.trim())}`);
+      setShowDropdown(true);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [query, selected]);
+
+  const customers = fetcher.data?.customers || [];
+  const searchError = fetcher.data?.error || null;
+  const searching = fetcher.state !== "idle";
+
+  const handleSelect = (c) => {
+    setSelected(c);
+    setShowDropdown(false);
+    setQuery("");
+  };
+
+  const handleClear = () => {
+    setSelected(null);
+    setQuery("");
+  };
+
+  return (
+    <div style={{ gridColumn: "span 2" }}>
+      <label style={labelStyle}>Customer</label>
+
+      {/* Hidden inputs always submitted with the form */}
+      <input type="hidden" name="customerId" value={selected?.id || ""} />
+      {selected && <input type="hidden" name="customerName" value={selected.name} />}
+      {selected && <input type="hidden" name="customerEmail" value={selected.email || ""} />}
+
+      {selected ? (
+        /* ── Selected customer card ── */
+        <div
+          style={{
+            padding: "10px 14px",
+            border: "1px solid #005bd3",
+            borderRadius: 6,
+            background: "#f3f7fe",
+            display: "flex",
+            alignItems: "flex-start",
+            justifyContent: "space-between",
+            gap: 10,
+          }}
+        >
+          <div style={{ lineHeight: 1.5 }}>
+            <div style={{ fontWeight: 700, fontSize: 14 }}>{selected.name}</div>
+            <div style={{ fontSize: 12, color: "#414547" }}>
+              {[selected.email, selected.phone].filter(Boolean).join(" · ")}
+            </div>
+            {(selected.city || selected.province) && (
+              <div style={{ fontSize: 12, color: "#6d7175" }}>
+                {[selected.city, selected.province].filter(Boolean).join(", ")}
+              </div>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={handleClear}
+            title="Remove — search for a different customer"
+            style={{
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              fontSize: 20,
+              color: "#6d7175",
+              lineHeight: 1,
+              padding: "0 2px",
+              flexShrink: 0,
+            }}
+          >
+            ×
+          </button>
+        </div>
+      ) : (
+        /* ── Search box + dropdown ── */
+        <div style={{ position: "relative" }}>
+          <div style={{ position: "relative" }}>
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onFocus={() => (customers.length > 0 || !!searchError) && setShowDropdown(true)}
+              onBlur={() => setTimeout(() => setShowDropdown(false), 160)}
+              placeholder="Search by name, email, or phone number…"
+              style={{ ...inputStyle, paddingRight: 34 }}
+            />
+            {searching && (
+              <span
+                style={{
+                  position: "absolute",
+                  right: 10,
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  fontSize: 12,
+                  color: "#6d7175",
+                }}
+              >
+                …
+              </span>
+            )}
+          </div>
+
+          {showDropdown && (
+            <div
+              style={{
+                position: "absolute",
+                top: "calc(100% + 4px)",
+                left: 0,
+                right: 0,
+                background: "#fff",
+                border: "1px solid #c9cccf",
+                borderRadius: 6,
+                boxShadow: "0 4px 14px rgba(0,0,0,.14)",
+                zIndex: 20,
+                maxHeight: 260,
+                overflowY: "auto",
+              }}
+            >
+              {searchError ? (
+                <div style={{ padding: "12px 14px", fontSize: 12, color: "#d72c0d" }}>
+                  ⚠ Customer search not available — enable Protected Customer Data in your Partners Dashboard.
+                </div>
+              ) : customers.length === 0 ? (
+                <div style={{ padding: "12px 14px", fontSize: 13, color: "#6d7175" }}>
+                  No customers found
+                </div>
+              ) : (
+                customers.map((c, i) => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onMouseDown={() => handleSelect(c)}
+                    style={{
+                      display: "flex",
+                      width: "100%",
+                      padding: "10px 14px",
+                      background: "none",
+                      border: "none",
+                      borderBottom: i < customers.length - 1 ? "1px solid #f1f2f3" : "none",
+                      cursor: "pointer",
+                      textAlign: "left",
+                      alignItems: "center",
+                      gap: 10,
+                    }}
+                  >
+                    {/* Avatar circle with initials */}
+                    <div
+                      style={{
+                        width: 34,
+                        height: 34,
+                        borderRadius: "50%",
+                        background: "#e3f1df",
+                        color: "#1a7a4a",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontWeight: 700,
+                        fontSize: 13,
+                        flexShrink: 0,
+                      }}
+                    >
+                      {(c.firstName?.[0] || c.name?.[0] || "?").toUpperCase()}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 600, fontSize: 13, color: "#212326" }}>
+                        {c.name}
+                      </div>
+                      <div style={{ fontSize: 12, color: "#6d7175", marginTop: 1 }}>
+                        {[c.email, c.phone].filter(Boolean).join(" · ")}
+                      </div>
+                      {(c.city || c.province) && (
+                        <div style={{ fontSize: 11, color: "#9da1a5" }}>
+                          {[c.city, c.province].filter(Boolean).join(", ")}
+                        </div>
+                      )}
+                    </div>
+                  </button>
+                ))
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Manual name/email — only shown when no Shopify customer is linked */}
+      {!selected && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 }}>
+          <div>
+            <label style={labelStyle}>Customer Name *</label>
+            <input name="customerName" required style={inputStyle} placeholder="Sarah Johnson" />
+          </div>
+          <div>
+            <label style={labelStyle}>Customer Email</label>
+            <input name="customerEmail" type="email" style={inputStyle} placeholder="customer@email.com" />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 /** Chip/pill tag input. Press Enter or comma to add; Backspace removes last. */
 function TagInput({ tags, onChange }) {
@@ -361,14 +578,7 @@ export default function RequestsPage() {
             <input type="hidden" name="_action" value="create" />
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
-              <div>
-                <label style={labelStyle}>Customer Name *</label>
-                <input name="customerName" required style={inputStyle} placeholder="Sarah Johnson" />
-              </div>
-              <div>
-                <label style={labelStyle}>Customer Email</label>
-                <input name="customerEmail" type="email" style={inputStyle} placeholder="customer@email.com" />
-              </div>
+              <CustomerSection inputStyle={inputStyle} labelStyle={labelStyle} />
 
               {salespeople.length > 0 && !useManualSp ? (
                 <>
@@ -435,7 +645,7 @@ export default function RequestsPage() {
                   </div>
                   <div>
                     <label style={labelStyle}>Salesperson Email *</label>
-                    <input name="salespersonEmail" type="email" required style={inputStyle} placeholder="staff@wbj.com" />
+                    <input name="salespersonEmail" type="email" required style={inputStyle} placeholder="staff@store.com" />
                   </div>
                 </>
               )}
@@ -501,10 +711,8 @@ export default function RequestsPage() {
               </div>
               <div>
                 <label style={labelStyle}>Priority</label>
-                <select name="priority" style={inputStyle}>
-                  <option value="low">Low</option>
-                  <option value="medium" defaultValue>Medium</option>
-                  <option value="high">High</option>
+                <select name="priority" defaultValue="normal" style={inputStyle}>
+                  <option value="normal">Normal</option>
                   <option value="urgent">Urgent</option>
                 </select>
               </div>

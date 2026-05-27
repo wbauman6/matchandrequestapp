@@ -1,7 +1,9 @@
-import { useLoaderData, Form, Link } from "react-router";
+import { useState, useEffect } from "react";
+import { useLoaderData, Form, Link, useFetcher } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
+import { sendNoteEmail } from "../lib/email.server";
 
 export const loader = async ({ request, params }) => {
   const { session } = await authenticate.admin(request);
@@ -9,7 +11,11 @@ export const loader = async ({ request, params }) => {
     where: { id: params.id, shop: session.shop },
     include: {
       matches: {
+        where: { declined: false },
         orderBy: [{ score: "desc" }, { createdAt: "desc" }],
+      },
+      notes: {
+        orderBy: { createdAt: "asc" },
       },
     },
   });
@@ -45,14 +51,51 @@ export const action = async ({ request, params }) => {
     });
   }
 
+  if (act === "decline-all") {
+    await prisma.match.updateMany({
+      where: { requestId: params.id, shop: session.shop, declined: false },
+      data: { declined: true, read: true },
+    });
+  }
+
+  if (act === "add-note") {
+    const authorName = String(data.get("authorName") || "Staff").trim();
+    const body = String(data.get("body") || "").trim();
+    const notifyStaff = data.get("notifyStaff") === "on";
+
+    if (body && authorName) {
+      await prisma.note.create({
+        data: {
+          shop: session.shop,
+          requestId: params.id,
+          authorName,
+          body,
+          notifyStaff,
+        },
+      });
+
+      if (notifyStaff && process.env.RESEND_API_KEY) {
+        const req = await prisma.request.findUnique({ where: { id: params.id } });
+        if (req) {
+          sendNoteEmail({
+            salespersonName: req.salespersonName,
+            salespersonEmail: req.salespersonEmail,
+            customerName: req.customerName,
+            authorName,
+            body,
+            shop: session.shop,
+          }).catch((err) => console.error("[email] note send failed:", err));
+        }
+      }
+    }
+  }
+
   return null;
 };
 
 const PRIORITY_COLOR = {
   urgent: "#d72c0d",
-  high: "#e18b00",
-  medium: "#005bd3",
-  low: "#616161",
+  normal: "#616161",
 };
 
 function scoreColor(score) {
@@ -220,6 +263,134 @@ function MatchTile({ m }) {
           </button>
         </Form>
       )}
+    </div>
+  );
+}
+
+const inputStyle = {
+  width: "100%",
+  padding: "8px 12px",
+  border: "1px solid #c9cccf",
+  borderRadius: 6,
+  fontSize: 14,
+  boxSizing: "border-box",
+};
+
+const labelStyle = { fontSize: 12, fontWeight: 600, marginBottom: 4, display: "block" };
+
+function NotesSection({ notes, salespersonName }) {
+  const fetcher = useFetcher();
+  const [body, setBody] = useState("");
+  const [author, setAuthor] = useState("");
+  const submitting = fetcher.state !== "idle";
+
+  // Clear body after successful note submission
+  useEffect(() => {
+    if (fetcher.state === "idle" && fetcher.data !== undefined) {
+      setBody("");
+    }
+  }, [fetcher.state, fetcher.data]);
+
+  return (
+    <div>
+      {notes.length === 0 ? (
+        <p style={{ color: "#6d7175", margin: "0 0 24px", textAlign: "center", padding: "20px 0" }}>
+          No notes yet. Add one below.
+        </p>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 24 }}>
+          {notes.map((n) => (
+            <div
+              key={n.id}
+              style={{
+                background: "#f6f6f7",
+                borderRadius: 8,
+                padding: "12px 16px",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "baseline",
+                  marginBottom: 6,
+                  gap: 8,
+                }}
+              >
+                <span style={{ fontWeight: 600, fontSize: 13 }}>{n.authorName}</span>
+                <span style={{ fontSize: 11, color: "#6d7175", flexShrink: 0 }}>
+                  {new Date(n.createdAt).toLocaleString(undefined, {
+                    month: "short",
+                    day: "numeric",
+                    hour: "numeric",
+                    minute: "2-digit",
+                  })}
+                </span>
+              </div>
+              <div style={{ fontSize: 14, color: "#212326", whiteSpace: "pre-wrap", lineHeight: 1.5 }}>
+                {n.body}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <fetcher.Form method="post">
+        <input type="hidden" name="_action" value="add-note" />
+        <div style={{ marginBottom: 10 }}>
+          <label style={labelStyle}>Your name</label>
+          <input
+            name="authorName"
+            required
+            value={author}
+            onChange={(e) => setAuthor(e.target.value)}
+            style={inputStyle}
+            placeholder="Jane Doe"
+          />
+        </div>
+        <div style={{ marginBottom: 10 }}>
+          <label style={labelStyle}>Note</label>
+          <textarea
+            name="body"
+            required
+            rows={3}
+            value={body}
+            onChange={(e) => setBody(e.target.value)}
+            style={{ ...inputStyle, resize: "vertical" }}
+            placeholder="Add a note or update about this request…"
+          />
+        </div>
+        <div
+          style={{
+            marginBottom: 14,
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+          }}
+        >
+          <input type="checkbox" name="notifyStaff" id="notify-check" />
+          <label htmlFor="notify-check" style={{ fontSize: 13, cursor: "pointer", color: "#414547" }}>
+            Email <strong>{salespersonName}</strong> about this note
+          </label>
+        </div>
+        <button
+          type="submit"
+          disabled={submitting}
+          style={{
+            background: "#008060",
+            color: "#fff",
+            border: "none",
+            borderRadius: 6,
+            padding: "8px 20px",
+            fontSize: 13,
+            fontWeight: 600,
+            cursor: submitting ? "not-allowed" : "pointer",
+            opacity: submitting ? 0.7 : 1,
+          }}
+        >
+          {submitting ? "Saving…" : "Add Note"}
+        </button>
+      </fetcher.Form>
     </div>
   );
 }
@@ -398,25 +569,51 @@ export default function RequestDetailPage() {
           unreadCount > 0 ? `, ${unreadCount} new` : ""
         })`}
       >
-        {unreadCount > 0 && (
-          <Form method="post" style={{ marginBottom: 16 }}>
-            <input type="hidden" name="_action" value="mark-all-read" />
-            <button
-              type="submit"
-              style={{
-                background: "none",
-                border: "1px solid #c9cccf",
-                borderRadius: 4,
-                padding: "4px 12px",
-                fontSize: 12,
-                cursor: "pointer",
-                color: "#616161",
-              }}
-            >
-              Mark all read ({unreadCount})
-            </button>
-          </Form>
-        )}
+        <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
+          {unreadCount > 0 && (
+            <Form method="post">
+              <input type="hidden" name="_action" value="mark-all-read" />
+              <button
+                type="submit"
+                style={{
+                  background: "none",
+                  border: "1px solid #c9cccf",
+                  borderRadius: 4,
+                  padding: "4px 12px",
+                  fontSize: 12,
+                  cursor: "pointer",
+                  color: "#616161",
+                }}
+              >
+                Mark all read ({unreadCount})
+              </button>
+            </Form>
+          )}
+          {req.matches.length > 0 && (
+            <Form method="post">
+              <input type="hidden" name="_action" value="decline-all" />
+              <button
+                type="submit"
+                style={{
+                  background: "none",
+                  border: "1px solid #d72c0d",
+                  borderRadius: 4,
+                  padding: "4px 12px",
+                  fontSize: 12,
+                  cursor: "pointer",
+                  color: "#d72c0d",
+                }}
+                onClick={(e) => {
+                  if (!confirm("Decline all current matches? These products won't be suggested for this request again (but can still match other requests).")) {
+                    e.preventDefault();
+                  }
+                }}
+              >
+                Decline all matches ({req.matches.length})
+              </button>
+            </Form>
+          )}
+        </div>
 
         {req.matches.length === 0 ? (
           <p
@@ -443,6 +640,10 @@ export default function RequestDetailPage() {
             ))}
           </div>
         )}
+      </s-section>
+
+      <s-section heading={`Notes (${req.notes.length})`}>
+        <NotesSection notes={req.notes} salespersonName={req.salespersonName} />
       </s-section>
     </s-page>
   );

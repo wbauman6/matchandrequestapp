@@ -16,9 +16,7 @@ datasource db {
 }
 
 enum Priority {
-  low
-  medium
-  high
+  normal
   urgent
 }
 
@@ -39,12 +37,15 @@ model Request {
   description      String?
   keywords         String[]
   budget           Float?
-  priority         Priority @default(medium)
+  customerId       String?
+  priority         Priority @default(normal)
   status           Status   @default(active)
   pinned           Boolean  @default(false)
+  lastReminderAt   DateTime?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
   matches          Match[]
+  notes            Note[]
 
   @@index([shop])
 }
@@ -60,12 +61,27 @@ model Match {
   score           Float
   matchedKeywords String[]
   read            Boolean  @default(false)
+  declined        Boolean  @default(false)
   createdAt       DateTime @default(now())
   request         Request  @relation(fields: [requestId], references: [id], onDelete: Cascade)
 
   @@unique([requestId, productId])
   @@index([shop])
   @@index([requestId])
+}
+
+model Note {
+  id          String   @id @default(cuid())
+  shop        String
+  requestId   String
+  authorName  String
+  body        String
+  notifyStaff Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  request     Request  @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  @@index([requestId])
+  @@index([shop])
 }
 
 model Salesperson {

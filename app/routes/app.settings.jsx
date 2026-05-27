@@ -156,7 +156,7 @@ export default function SettingsPage() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 style={inputStyle}
-                placeholder="jane@wbj.com"
+                placeholder="jane@store.com"
               />
             </div>
             <button
