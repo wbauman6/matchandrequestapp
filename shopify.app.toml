@@ -2,12 +2,11 @@
 
 client_id = "4e175e53a017b7f44084570010bb5a28"
 name = "matchandrequestapp"
-application_url = "https://example.com"
+application_url = "https://matchandrequestapp2.vercel.app"
 embedded = true
 
 [build]
 automatically_update_urls_on_dev = true
-include_config_on_deploy = true
 
 [webhooks]
 api_version = "2026-07"
@@ -29,7 +28,7 @@ api_version = "2026-07"
 scopes = "read_products,read_inventory,write_products,write_metaobjects,write_metaobject_definitions,read_customers"
 
 [auth]
-redirect_urls = [ "https://example.com/api/auth" ]
+redirect_urls = [ "https://matchandrequestapp2.vercel.app/api/auth" ]
 
 [product.metafields.app.demo_info]
 type = "single_line_text_field"
