@@ -46,7 +46,7 @@ export const action = async ({ request }) => {
         description: String(data.get("description") || "") || null,
         keywords,
         budget: Number.isFinite(budget) ? budget : null,
-        priority: String(data.get("priority") || "medium"),
+        priority: String(data.get("priority") || "normal"),
         pinned: data.get("pinned") === "on",
       },
     });

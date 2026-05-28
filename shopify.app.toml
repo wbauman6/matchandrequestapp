@@ -28,7 +28,7 @@ api_version = "2026-07"
 scopes = "read_products,read_inventory,write_products,write_metaobjects,write_metaobject_definitions,read_customers"
 
 [auth]
-redirect_urls = [ "https://matchandrequestapp2.vercel.app/api/auth" ]
+redirect_urls = [ "https://matchandrequestapp2.vercel.app/auth/callback" ]
 
 [product.metafields.app.demo_info]
 type = "single_line_text_field"
