@@ -46,23 +46,46 @@ export async function fetchInStockProducts(admin) {
   return products;
 }
 
+const PRODUCT_TAGS_QUERY = `#graphql
+  query GetProductTags($cursor: String) {
+    productTags(first: 250, after: $cursor) {
+      nodes
+      pageInfo { hasNextPage endCursor }
+    }
+  }
+`;
+
+// Returns the live, distinct list of product tags from the store, preserving
+// each tag's original spelling/casing (deduped case-insensitively). The keyword
+// matcher is case-insensitive, so keeping real casing here lets the AI tagger
+// return tags like "Tiffany & Co." instead of a flattened "tiffany & co.".
+//
+// Uses the shop-level `productTags` connection (one cheap request, up to 250
+// tags per page) instead of paginating every product — the old approach walked
+// the entire catalog on every "Suggest keywords" click and timed out the
+// 30s serverless function.
 export async function fetchAllProductTags(admin) {
-  const tags = new Set();
+  const byLower = new Map(); // lowercase -> first-seen original casing
   let cursor = null;
   let hasNextPage = true;
 
   while (hasNextPage) {
-    const response = await admin.graphql(PRODUCTS_QUERY, { variables: { cursor } });
+    const response = await admin.graphql(PRODUCT_TAGS_QUERY, {
+      variables: { cursor },
+    });
     const json = await response.json();
-    const page = json.data.products;
+    const page = json.data.productTags;
 
-    for (const { node } of page.edges) {
-      node.tags.forEach((t) => tags.add(t.toLowerCase().trim()));
+    for (const tag of page.nodes) {
+      const trimmed = String(tag).trim();
+      if (!trimmed) continue;
+      const lower = trimmed.toLowerCase();
+      if (!byLower.has(lower)) byLower.set(lower, trimmed);
     }
 
     hasNextPage = page.pageInfo.hasNextPage;
     cursor = page.pageInfo.endCursor;
   }
 
-  return [...tags].sort();
+  return [...byLower.values()].sort((a, b) => a.localeCompare(b));
 }

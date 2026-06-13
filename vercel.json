@@ -1,9 +1,16 @@
 {
   "buildCommand": "npm run vercel-build",
-  "crons": [
-    {
-      "path": "/api/reminders",
-      "schedule": "0 14 * * *"
+  "outputDirectory": "build/client",
+  "functions": {
+    "api/handler.js": {
+      "maxDuration": 30,
+      "includeFiles": "{build/**,node_modules/.prisma/client/**,node_modules/@prisma/client/**}"
     }
+  },
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/api/handler.js" }
+  ],
+  "crons": [
+    { "path": "/api/reminders", "schedule": "0 14 * * *" }
   ]
 }
