@@ -6,7 +6,7 @@ import prisma from "../db.server";
 export const loader = async ({ request }) => {
   const { session } = await authenticate.admin(request);
   const matches = await prisma.match.findMany({
-    where: { shop: session.shop, declined: false },
+    where: { shop: session.shop, declined: false, needsReview: false },
     include: {
       request: {
         select: {

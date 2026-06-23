@@ -4,6 +4,9 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { runMatchesForRequest } from "../lib/matchRunner.server";
+import { classifyKeywordImportance } from "../lib/anthropic.server";
+import { isMustHaveTag } from "../lib/tagTiers";
+import { deriveFacets } from "../lib/facets";
 
 export const loader = async ({ request }) => {
   const { session } = await authenticate.admin(request);
@@ -35,6 +38,9 @@ export const action = async ({ request }) => {
       .filter(Boolean);
     const budgetStr = String(data.get("budget") || "").trim();
     const budget = budgetStr ? parseFloat(budgetStr) : null;
+    // Derive typed facets from the canonical tags so we can index by item type
+    // and inspect the structured query later.
+    const facets = deriveFacets(keywords);
     const req = await prisma.request.create({
       data: {
         shop,
@@ -45,12 +51,25 @@ export const action = async ({ request }) => {
         salespersonEmail: String(data.get("salespersonEmail")),
         description: String(data.get("description") || "") || null,
         keywords,
+        facets,
+        itemType: facets.item_type,
         budget: Number.isFinite(budget) ? budget : null,
         priority: String(data.get("priority") || "normal"),
         pinned: data.get("pinned") === "on",
       },
     });
-    await runMatchesForRequest(admin, req);
+    // The curated tag-tier map decides which keywords are defining. Only when it
+    // covers none of them (e.g. all were manual free-text not in the catalog) do
+    // we ask the AI to classify importance. Non-fatal — the matcher falls back
+    // to its catalog-rarity heuristic otherwise.
+    let aiRequired = [];
+    if (!keywords.some(isMustHaveTag) && process.env.ANTHROPIC_API_KEY) {
+      aiRequired = await classifyKeywordImportance({
+        keywords,
+        description: req.description || "",
+      }).catch(() => []);
+    }
+    await runMatchesForRequest(admin, req, aiRequired);
     return { created: true };
   }
 

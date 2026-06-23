@@ -11,6 +11,7 @@
     "config:use": "shopify app config use",
     "env": "shopify app env",
     "start": "react-router-serve ./build/server/index.js",
+    "test": "node --test",
     "docker-start": "npm run setup && npm run start",
     "setup": "prisma generate && node scripts/patch-prisma.cjs && prisma migrate deploy",
     "prisma:generate": "prisma generate && node scripts/patch-prisma.cjs",

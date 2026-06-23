@@ -59,7 +59,9 @@ export async function suggestKeywords({ description, vocabulary = [] }) {
   if (!description || !description.trim()) return [];
 
   const hasVocab = vocabulary.length > 0;
-  const vocabList = vocabulary.slice(0, 500);
+  // Send the full meaningful vocabulary (junk date/numeric tags are already
+  // filtered upstream). Cap generously so real tags aren't crowded out.
+  const vocabList = vocabulary.slice(0, 2000);
 
   const systemPrompt = hasVocab
     ? `You are a jewelry-store cataloging assistant. You tag a customer's special-order request using ONLY the store's controlled vocabulary of existing Shopify product tags, so the request can be matched against real inventory.
@@ -67,8 +69,11 @@ export async function suggestKeywords({ description, vocabulary = [] }) {
 Rules:
 - You MUST choose tags ONLY from the provided vocabulary list. NEVER invent a tag. NEVER output a tag that is not in the list. If something fits conceptually but is not in the list, leave it out.
 - Use the vocabulary's exact spelling and casing.
-- First, reason internally about the description: expand brand nicknames and abbreviations to their formal names (e.g. "tiffany" -> "Tiffany & Co.", "ysl" -> "Yves Saint Laurent"), infer the item type, and infer style, era, material, and motif where the description supports it.
-- Then match that reasoning against the vocabulary and select EVERY tag that genuinely fits: brand tags, item-type tags, style tags, motif tags, and material tags. Apply every tag that fits, but never invent one.
+- First, reason internally about the description: expand brand nicknames and abbreviations to their formal names (e.g. "tiffany" -> "Tiffany & Co.", "ysl" -> "Yves Saint Laurent"), infer the item type, and infer material, motif, and principal gemstone where the description clearly supports it.
+- Then select only the FEW tags that DEFINE this request — its motif, item type, material, brand, and principal gemstone. Aim for roughly 3 to 6 tags. These tags are used to search inventory, so each extra generic tag wrongly widens the results.
+- Choose the single most specific tag for each attribute. Do NOT output near-duplicates of the same concept (e.g. do not include both a singular and plural form, and do not include several overlapping item-type tags).
+- Do NOT infer attributes the description does not clearly state. In particular, do NOT add gender, age/era, or color tags unless the customer explicitly mentions them.
+- Resolve ambiguous words using the whole description. For example, an item described as going "on a chain" is a pendant or charm, NOT earrings; do not add earring tags for it.
 - If a brand nickname or shorthand maps to a tag in the vocabulary, use the vocabulary's exact spelling/casing for it.
 
 The vocabulary may use prefixed/namespaced tags such as "mat:silver" (material = silver), "mat:gold", "brand:cartier", "type:ring", etc. When a concept you inferred matches the meaning of a prefixed tag, select that prefixed tag exactly as written. For example, if the customer wants something in silver, choose "mat:silver" if it is in the list.
@@ -147,5 +152,69 @@ Return the JSON object now.`;
       out.push(t);
     }
   }
-  return out.slice(0, 12);
+  return out.slice(0, 8);
+}
+
+/**
+ * Classify which of a request's keywords are DEFINING (the item's identity:
+ * item type, brand, motif, material) versus DESCRIPTIVE (color, era, gender,
+ * gemstone, size). The matcher hard-requires the defining ones, so a Cartier
+ * necklace request can't surface a Cartier earring, while a blue-dial watch
+ * request still surfaces a grey-dial watch of the same brand.
+ *
+ * Returns the subset of `keywords` that are defining (same strings, same order).
+ * On any failure returns [] so the caller can fall back to its own heuristic.
+ */
+export async function classifyKeywordImportance({ keywords, description = "" }) {
+  if (!keywords || keywords.length === 0) return [];
+
+  const systemPrompt = `You classify jewelry search tags for a matching engine.
+
+A tag is DEFINING when it determines what the item fundamentally IS — a product that lacks it is simply the wrong item:
+- item type (ring, necklace, earrings, watch, pendant, bracelet, ...)
+- brand (Rolex, Cartier, Tiffany & Co., ...)
+- motif / theme (cross, Star of David / Hebrew, heart, ...)
+- material (gold, sterling silver, platinum, ...)
+
+A tag is DESCRIPTIVE when it only refines preference and should NEVER exclude a product:
+- color / dial color, era / age / "vintage" / "estate", gender, gemstone, carat, size, condition.
+
+Given the request and its tags, return ONLY the DEFINING tags, exactly as written (same spelling/casing). Respond with ONLY a JSON object, no other text:
+{"required": ["tag", ...], "reasoning": "one short sentence"}`;
+
+  const userPrompt = `Request description: "${description}"
+Tags: ${JSON.stringify(keywords)}
+
+Return the JSON now.`;
+
+  try {
+    const c = getClient();
+    const response = await c.messages.create({
+      model: MODEL,
+      max_tokens: 512,
+      system: systemPrompt,
+      messages: [{ role: "user", content: userPrompt }],
+    });
+    const raw =
+      response.content?.[0]?.type === "text" ? response.content[0].text : "";
+    const parsed = parseJsonObject(raw);
+    if (!parsed || !Array.isArray(parsed.required)) return [];
+
+    // Keep only values that are actually in the request's keyword list
+    // (case-insensitive), mapped back to the stored keyword strings.
+    const byLower = new Map(keywords.map((k) => [k.toLowerCase(), k]));
+    const required = [];
+    const seen = new Set();
+    for (const t of parsed.required) {
+      const k = byLower.get(String(t).trim().toLowerCase());
+      if (k && !seen.has(k)) {
+        seen.add(k);
+        required.push(k);
+      }
+    }
+    return required;
+  } catch (err) {
+    console.error("classifyKeywordImportance failed:", err?.message || err);
+    return [];
+  }
 }

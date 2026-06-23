@@ -3,15 +3,19 @@ import { useLoaderData, Form, useNavigation } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
+import { getShopConfig, updateShopConfig } from "../lib/shopConfig.server";
 
 export const loader = async ({ request }) => {
   const { session } = await authenticate.admin(request);
-  const salespeople = await prisma.salesperson.findMany({
-    where: { shop: session.shop },
-    orderBy: [{ active: "desc" }, { name: "asc" }],
-  });
+  const [salespeople, config] = await Promise.all([
+    prisma.salesperson.findMany({
+      where: { shop: session.shop },
+      orderBy: [{ active: "desc" }, { name: "asc" }],
+    }),
+    getShopConfig(session.shop),
+  ]);
   const hasAnthropicKey = Boolean(process.env.ANTHROPIC_API_KEY);
-  return { salespeople, hasAnthropicKey };
+  return { salespeople, hasAnthropicKey, config };
 };
 
 export const action = async ({ request }) => {
@@ -35,6 +39,24 @@ export const action = async ({ request }) => {
       }
       throw err;
     }
+  }
+
+  if (act === "config") {
+    const autoNotifyScore = parseInt(data.get("autoNotifyScore"), 10);
+    const reviewScore = parseInt(data.get("reviewScore"), 10);
+    const stage2Enabled = data.get("stage2Enabled") === "on";
+    if (!Number.isFinite(autoNotifyScore) || !Number.isFinite(reviewScore)) {
+      return { error: "Thresholds must be numbers" };
+    }
+    if (reviewScore > autoNotifyScore) {
+      return { error: "Review threshold must be ≤ auto-notify threshold" };
+    }
+    await updateShopConfig(session.shop, {
+      autoNotifyScore: Math.max(0, Math.min(100, autoNotifyScore)),
+      reviewScore: Math.max(0, Math.min(100, reviewScore)),
+      stage2Enabled,
+    });
+    return { configSaved: true };
   }
 
   if (act === "toggle") {
@@ -83,7 +105,7 @@ const btnSecondary = {
 };
 
 export default function SettingsPage() {
-  const { salespeople, hasAnthropicKey } = useLoaderData();
+  const { salespeople, hasAnthropicKey, config } = useLoaderData();
   const nav = useNavigation();
   const submitting = nav.state === "submitting";
   const [name, setName] = useState("");
@@ -91,6 +113,83 @@ export default function SettingsPage() {
 
   return (
     <s-page heading="Settings">
+      <s-section heading="Match thresholds">
+        <Form method="post">
+          <input type="hidden" name="_action" value="config" />
+          <p style={{ fontSize: 13, color: "#616161", marginTop: 0 }}>
+            Matches scoring at or above the <strong>auto-notify</strong> score alert
+            the salesperson directly. Matches between the <strong>review</strong> and
+            auto-notify scores go to the Review queue for one-tap confirm/dismiss.
+            Anything below the review score is dropped.
+          </p>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: 12,
+              maxWidth: 420,
+            }}
+          >
+            <div>
+              <label style={labelStyle}>Auto-notify score (0–100)</label>
+              <input
+                name="autoNotifyScore"
+                type="number"
+                min="0"
+                max="100"
+                defaultValue={config.autoNotifyScore}
+                style={inputStyle}
+              />
+            </div>
+            <div>
+              <label style={labelStyle}>Review score (0–100)</label>
+              <input
+                name="reviewScore"
+                type="number"
+                min="0"
+                max="100"
+                defaultValue={config.reviewScore}
+                style={inputStyle}
+              />
+            </div>
+          </div>
+          <label
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              fontSize: 14,
+              margin: "14px 0",
+            }}
+          >
+            <input
+              type="checkbox"
+              name="stage2Enabled"
+              defaultChecked={config.stage2Enabled}
+            />
+            Use AI to double-check borderline matches before queuing them
+            (slower, small per-match cost)
+          </label>
+          <button
+            type="submit"
+            disabled={submitting}
+            style={{
+              background: "#008060",
+              color: "#fff",
+              border: "none",
+              borderRadius: 6,
+              padding: "10px 20px",
+              fontSize: 14,
+              fontWeight: 600,
+              cursor: submitting ? "not-allowed" : "pointer",
+              opacity: submitting ? 0.7 : 1,
+            }}
+          >
+            {submitting ? "Saving…" : "Save thresholds"}
+          </button>
+        </Form>
+      </s-section>
+
       <s-section heading="AI keyword suggestions">
         <div
           style={{

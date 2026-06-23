@@ -23,6 +23,7 @@ enum Priority {
 enum Status {
   active
   pending
+  in_review
   fulfilled
   archived
 }
@@ -42,12 +43,18 @@ model Request {
   status           Status   @default(active)
   pinned           Boolean  @default(false)
   lastReminderAt   DateTime?
+  // Typed facets derived from keywords at creation (item_type, brand, motif,
+  // gemstone, material, etc.) — see app/lib/facets.js. Stored for inspection
+  // and to enable item_type-indexed candidate lookup.
+  facets           Json?
+  itemType         String?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
   matches          Match[]
   notes            Note[]
 
   @@index([shop])
+  @@index([shop, itemType])
 }
 
 model Match {
@@ -62,12 +69,17 @@ model Match {
   matchedKeywords String[]
   read            Boolean  @default(false)
   declined        Boolean  @default(false)
+  // Review queue: borderline matches are flagged for staff confirm/dismiss.
+  needsReview     Boolean  @default(false)
+  reasoning       String?
+  confirmedAt     DateTime?
   createdAt       DateTime @default(now())
   request         Request  @relation(fields: [requestId], references: [id], onDelete: Cascade)
 
   @@unique([requestId, productId])
   @@index([shop])
   @@index([requestId])
+  @@index([shop, needsReview])
 }
 
 model Note {
@@ -94,6 +106,21 @@ model Salesperson {
 
   @@unique([shop, email])
   @@index([shop])
+}
+
+model ShopConfig {
+  id              String   @id @default(cuid())
+  shop            String   @unique
+  // Matches scoring >= autoNotifyScore notify the salesperson directly.
+  // Matches scoring >= reviewScore but < autoNotifyScore go to the review queue.
+  // Below reviewScore are dropped.
+  autoNotifyScore Int      @default(45)
+  reviewScore     Int      @default(25)
+  // When enabled, borderline (review-band) matches are additionally judged by a
+  // single structured LLM call before being queued/notified.
+  stage2Enabled   Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 }
 
 model Session {
