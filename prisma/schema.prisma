@@ -73,6 +73,7 @@ model Match {
   // Review queue: borderline matches are flagged for staff confirm/dismiss.
   needsReview     Boolean  @default(false)
   reasoning       String?
+  confidence      String?
   confirmedAt     DateTime?
   createdAt       DateTime @default(now())
   request         Request  @relation(fields: [requestId], references: [id], onDelete: Cascade)
@@ -110,15 +111,17 @@ model Salesperson {
 }
 
 model ProductEmbedding {
-  id        String   @id @default(cuid())
-  shop      String
-  productId String   @unique
-  hash      String
-  embedding Json
-  title     String?
-  price     Float?
-  image     String?
-  updatedAt DateTime @updatedAt
+  id          String   @id @default(cuid())
+  shop        String
+  productId   String   @unique
+  hash        String
+  embedding   Json
+  title       String?
+  description String?
+  productType String?
+  price       Float?
+  image       String?
+  updatedAt   DateTime @updatedAt
 
   @@index([shop])
 }

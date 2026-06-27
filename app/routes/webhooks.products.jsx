@@ -57,7 +57,9 @@ export const action = async ({ request }) => {
     tags,
     price,
     image,
-    totalInventory: isActive ? totalInventory : 0,
+    // status:active = available (estate one-of-a-kind items are often qty 0).
+    active: isActive,
+    totalInventory,
   };
 
   try {

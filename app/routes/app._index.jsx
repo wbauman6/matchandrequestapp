@@ -4,9 +4,6 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { runMatchesForRequest } from "../lib/matchRunner.server";
-import { classifyKeywordImportance } from "../lib/anthropic.server";
-import { isMustHaveTag } from "../lib/tagTiers";
-import { deriveFacets } from "../lib/facets";
 
 export const loader = async ({ request }) => {
   const { session } = await authenticate.admin(request);
@@ -32,15 +29,10 @@ export const action = async ({ request }) => {
   const act = data.get("_action");
 
   if (act === "create") {
-    const keywords = String(data.get("keywords") || "")
-      .split(",")
-      .map((k) => k.trim().toLowerCase())
-      .filter(Boolean);
     const budgetStr = String(data.get("budget") || "").trim();
     const budget = budgetStr ? parseFloat(budgetStr) : null;
-    // Derive typed facets from the canonical tags so we can index by item type
-    // and inspect the structured query later.
-    const facets = deriveFacets(keywords);
+    // Description-only: the plain-English description drives semantic retrieval +
+    // AI reasoning. No keyword field anymore.
     const req = await prisma.request.create({
       data: {
         shop,
@@ -50,26 +42,13 @@ export const action = async ({ request }) => {
         salespersonName: String(data.get("salespersonName")),
         salespersonEmail: String(data.get("salespersonEmail")),
         description: String(data.get("description") || "") || null,
-        keywords,
-        facets,
-        itemType: facets.item_type,
+        keywords: [],
         budget: Number.isFinite(budget) ? budget : null,
         priority: String(data.get("priority") || "normal"),
         pinned: data.get("pinned") === "on",
       },
     });
-    // The curated tag-tier map decides which keywords are defining. Only when it
-    // covers none of them (e.g. all were manual free-text not in the catalog) do
-    // we ask the AI to classify importance. Non-fatal — the matcher falls back
-    // to its catalog-rarity heuristic otherwise.
-    let aiRequired = [];
-    if (!keywords.some(isMustHaveTag) && process.env.ANTHROPIC_API_KEY) {
-      aiRequired = await classifyKeywordImportance({
-        keywords,
-        description: req.description || "",
-      }).catch(() => []);
-    }
-    await runMatchesForRequest(admin, req, aiRequired);
+    await runMatchesForRequest(admin, req);
     return { created: true };
   }
 
@@ -537,42 +516,18 @@ function TagInput({ tags, onChange }) {
 }
 
 export default function RequestsPage() {
-  const { requests, salespeople, hasAnthropicKey } = useLoaderData();
+  const { requests, salespeople } = useLoaderData();
   const nav = useNavigation();
-  const suggestFetcher = useFetcher();
   const [showForm, setShowForm] = useState(false);
   const [description, setDescription] = useState("");
-  const [tags, setTags] = useState([]);
   const [salespersonId, setSalespersonId] = useState("");
   const [useManualSp, setUseManualSp] = useState(salespeople.length === 0);
   const submitting = nav.state === "submitting";
-  const suggesting = suggestFetcher.state !== "idle";
-
-  // Merge AI suggestions into existing tags (no dupes).
-  useEffect(() => {
-    if (suggestFetcher.data?.keywords?.length) {
-      setTags((prev) => {
-        const next = [...prev];
-        for (const kw of suggestFetcher.data.keywords) {
-          if (!next.includes(kw)) next.push(kw);
-        }
-        return next;
-      });
-    }
-  }, [suggestFetcher.data]);
 
   const selectedSp = salespeople.find((s) => s.id === salespersonId);
 
-  const handleSuggest = () => {
-    if (!description.trim()) return;
-    const fd = new FormData();
-    fd.append("description", description);
-    suggestFetcher.submit(fd, { method: "post", action: "/api/suggest-keywords" });
-  };
-
   const resetForm = () => {
     setDescription("");
-    setTags([]);
     setSalespersonId("");
     setUseManualSp(salespeople.length === 0);
   };
@@ -671,49 +626,19 @@ export default function RequestsPage() {
             </div>
 
             <div style={{ marginBottom: 16 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-                <label style={{ ...labelStyle, marginBottom: 0 }}>Description</label>
-                {hasAnthropicKey && (
-                  <button
-                    type="button"
-                    onClick={handleSuggest}
-                    disabled={suggesting || !description.trim()}
-                    style={{
-                      background: "none",
-                      border: "1px solid #c9cccf",
-                      borderRadius: 4,
-                      padding: "4px 10px",
-                      fontSize: 12,
-                      cursor: suggesting || !description.trim() ? "not-allowed" : "pointer",
-                      color: "#414547",
-                      opacity: suggesting || !description.trim() ? 0.6 : 1,
-                    }}
-                  >
-                    {suggesting ? "Suggesting…" : "✨ Suggest keywords"}
-                  </button>
-                )}
-              </div>
+              <label style={{ ...labelStyle }}>Description *</label>
               <textarea
                 name="description"
                 rows={3}
+                required
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 style={{ ...inputStyle, resize: "vertical" }}
-                placeholder="What is the customer looking for? (e.g. 'art deco engagement ring with sapphire')"
+                placeholder="Describe what the customer wants in plain English (e.g. 'grand seiko watch with a round dial' or 'yellow gold tennis bracelet under $3000')"
               />
-              {suggestFetcher.data?.error && (
-                <div style={{ fontSize: 12, color: "#d72c0d", marginTop: 4 }}>
-                  {suggestFetcher.data.error}
-                </div>
-              )}
-            </div>
-
-            {/* Hidden input carries tags as comma-separated string to the action */}
-            <input type="hidden" name="keywords" value={tags.join(", ")} />
-
-            <div style={{ marginBottom: 16 }}>
-              <label style={labelStyle}>Keywords</label>
-              <TagInput tags={tags} onChange={setTags} />
+              <div style={{ fontSize: 12, color: "#6d7175", marginTop: 4 }}>
+                Just describe it — the app finds matching inventory automatically and keeps watching for new arrivals.
+              </div>
             </div>
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 100px", gap: 16, marginBottom: 20 }}>

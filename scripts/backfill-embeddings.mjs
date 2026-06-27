@@ -28,7 +28,7 @@ if (!sess.rows.length) {
 const token = sess.rows[0].accessToken;
 
 const endpoint = `https://${SHOP}/admin/api/2025-10/graphql.json`;
-const QUERY = `query($cursor:String){ products(first:250, after:$cursor, query:"status:active"){ pageInfo{hasNextPage endCursor} edges{ node{ id title description tags totalInventory priceRangeV2{minVariantPrice{amount}} featuredImage{url} } } } }`;
+const QUERY = `query($cursor:String){ products(first:250, after:$cursor, query:"status:active"){ pageInfo{hasNextPage endCursor} edges{ node{ id title description productType tags totalInventory priceRangeV2{minVariantPrice{amount}} featuredImage{url} } } } }`;
 
 console.log("Fetching catalog…");
 const products = [];
@@ -42,41 +42,46 @@ while (hasNext) {
   const j = await r.json();
   if (j.errors) { console.error(JSON.stringify(j.errors)); break; }
   const page = j.data.products;
+  // status:active = available. Estate one-of-a-kind items often have inventory
+  // tracking off (totalInventory 0) but are still for sale — include them all.
   for (const { node } of page.edges) {
-    if (node.totalInventory > 0) {
-      const amount = node.priceRangeV2?.minVariantPrice?.amount;
-      products.push({
-        id: node.id,
-        title: node.title,
-        description: node.description || "",
-        tags: (node.tags || []).map((t) => t.toLowerCase().trim()).filter(Boolean),
-        price: amount != null ? parseFloat(amount) : null,
-        image: node.featuredImage?.url || null,
-      });
-    }
+    const amount = node.priceRangeV2?.minVariantPrice?.amount;
+    products.push({
+      id: node.id,
+      title: node.title,
+      description: node.description || "",
+      productType: node.productType || "",
+      tags: (node.tags || []).map((t) => t.toLowerCase().trim()).filter(Boolean),
+      price: amount != null ? parseFloat(amount) : null,
+      image: node.featuredImage?.url || null,
+    });
   }
   hasNext = page.pageInfo.hasNextPage;
   cursor = page.pageInfo.endCursor;
 }
 console.log(`In-stock products: ${products.length}`);
 
-const existing = await db.query('SELECT "productId", hash FROM "ProductEmbedding" WHERE shop = $1', [SHOP]);
-const existingHash = new Map(existing.rows.map((e) => [e.productId, e.hash]));
+const existing = await db.query('SELECT "productId", hash, description FROM "ProductEmbedding" WHERE shop = $1', [SHOP]);
+const existingById = new Map(existing.rows.map((e) => [e.productId, e]));
 
 const todo = [];
 for (const p of products) {
   const text = buildProductText(p);
   const hash = textHash(text);
-  if (existingHash.get(p.id) !== hash) todo.push({ p, text, hash });
+  const prev = existingById.get(p.id);
+  // Re-process if new/changed OR if we don't yet have the description stored.
+  if (!prev || prev.hash !== hash || !prev.description) todo.push({ p, text, hash });
 }
 console.log(`Need embedding: ${todo.length} (skipping ${products.length - todo.length} unchanged)`);
 
 const UPSERT = `
-  INSERT INTO "ProductEmbedding" (id, shop, "productId", hash, embedding, title, price, image, "updatedAt")
-  VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, now())
+  INSERT INTO "ProductEmbedding" (id, shop, "productId", hash, embedding, title, description, "productType", price, image, "updatedAt")
+  VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, now())
   ON CONFLICT ("productId") DO UPDATE SET
     hash = EXCLUDED.hash, embedding = EXCLUDED.embedding,
-    title = EXCLUDED.title, price = EXCLUDED.price, image = EXCLUDED.image,
+    title = EXCLUDED.title, description = EXCLUDED.description,
+    "productType" = EXCLUDED."productType",
+    price = EXCLUDED.price, image = EXCLUDED.image,
     "updatedAt" = now()`;
 
 const CHUNK = 100;
@@ -93,6 +98,8 @@ for (let i = 0; i < todo.length; i += CHUNK) {
       s.hash,
       JSON.stringify(vectors[k]),
       s.p.title,
+      s.p.description,
+      s.p.productType,
       s.p.price,
       s.p.image,
     ]);

@@ -59,7 +59,7 @@ function productRow(m) {
         </span>
       </td>
       <td style="padding:12px;border-bottom:1px solid #e1e3e5;font-size:12px;color:#6d7175;">
-        ${m.matchedKeywords.join(", ")}
+        ${m.reason || (m.matchedKeywords || []).join(", ")}
       </td>
     </tr>`;
 }
@@ -291,7 +291,7 @@ export async function sendNewProductMatchEmail({
             ${match.score}% match
           </span>
           <div style="margin-top:8px;font-size:12px;color:#6d7175;">
-            Keywords: ${match.matchedKeywords.join(", ")}
+            ${match.reason || "Keywords: " + (match.matchedKeywords || []).join(", ")}
           </div>
         </div>
       </div>
