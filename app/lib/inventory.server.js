@@ -6,6 +6,8 @@ const PRODUCTS_QUERY = `#graphql
         node {
           id
           title
+          productType
+          vendor
           tags
           totalInventory
           priceRangeV2 { minVariantPrice { amount } }
@@ -32,6 +34,8 @@ export async function fetchInStockProducts(admin) {
         products.push({
           id: node.id,
           title: node.title,
+          productType: node.productType || "",
+          vendor: node.vendor || "",
           tags: node.tags.map((t) => t.toLowerCase().trim()).filter(Boolean),
           price: amount != null ? parseFloat(amount) : null,
           image: node.featuredImage?.url || null,

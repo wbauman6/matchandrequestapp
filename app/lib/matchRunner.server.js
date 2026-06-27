@@ -9,6 +9,11 @@ import {
   blendScore,
 } from "./matching.js";
 import { isMustHaveTag } from "./tagTiers.js";
+import {
+  extractRequestAttributes,
+  extractProductAttributes,
+  passesHardFilters,
+} from "./attributes.js";
 import { getShopConfig } from "./shopConfig.server.js";
 import { judgeMatch } from "./matchJudge.server.js";
 import { fetchInStockProducts } from "./inventory.server.js";
@@ -111,6 +116,8 @@ export async function runMatchesForRequest(admin, request, aiRequired = null) {
 
   const weights = computeKeywordWeights(request.keywords, products);
   const required = requiredKeywords(request, weights, aiRequired);
+  // Stage 1 hard filter: metal color, item type, brand dealbreakers.
+  const reqAttrs = extractRequestAttributes(request);
 
   const ops = [];
   const notifyProducts = [];
@@ -118,6 +125,7 @@ export async function runMatchesForRequest(admin, request, aiRequired = null) {
   for (const product of products) {
     if (declinedProductIds.has(product.id)) continue;
     if (!passesBudgetSanity(request.budget, product.price)) continue;
+    if (!passesHardFilters(reqAttrs, extractProductAttributes(product)).pass) continue;
 
     const { score: kwScore, matchedKeywords } = weightedMatch(
       request.keywords,
@@ -211,11 +219,14 @@ export async function matchProductAgainstRequests(shop, product) {
 
   const ops = [];
   const newNotifyPairs = [];
+  const prodAttrs = extractProductAttributes(product);
 
   for (const request of requests) {
     if (existingByRequestId.get(request.id)?.declined) continue;
     if (!passesBudgetSanity(request.budget, product.price)) continue;
     if (!request.keywords || request.keywords.length === 0) continue;
+    // Stage 1 hard filter: metal color, item type, brand dealbreakers.
+    if (!passesHardFilters(extractRequestAttributes(request), prodAttrs).pass) continue;
 
     // Unweighted soft score (no catalog corpus in the webhook), but apply the
     // deterministic HARD facet filter so a shared common tag can't match.

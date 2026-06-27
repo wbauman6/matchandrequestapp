@@ -46,6 +46,8 @@ export const action = async ({ request }) => {
   const product = {
     id: gid,
     title: payload.title || "",
+    productType: payload.product_type || "",
+    vendor: payload.vendor || "",
     tags,
     price,
     image,
