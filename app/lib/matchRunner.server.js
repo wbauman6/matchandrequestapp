@@ -5,8 +5,8 @@ import {
   weightedMatch,
   definingKeywords,
   isSoftCategory,
-  priceProximity,
-  blendScore,
+  cosineSimilarity,
+  similarityToScore,
 } from "./matching.js";
 import { isMustHaveTag } from "./tagTiers.js";
 import {
@@ -14,13 +14,19 @@ import {
   extractProductAttributes,
   passesHardFilters,
 } from "./attributes.js";
+import {
+  embedText,
+  buildRequestText,
+  buildProductText,
+  textHash,
+  hasEmbeddingKey,
+} from "./embeddings.server.js";
 import { getShopConfig } from "./shopConfig.server.js";
 import { judgeMatch } from "./matchJudge.server.js";
 import { fetchInStockProducts } from "./inventory.server.js";
 import { sendMatchSummaryEmail, sendNewProductMatchEmail } from "./email.server.js";
 
-// Price is now a soft signal, but keep a sanity ceiling so we never surface a
-// wildly-over-budget item (e.g. a $50k watch for a $500 request).
+// Sanity ceiling so a wildly-over-budget item never surfaces.
 const BUDGET_SANITY_MULTIPLE = 3;
 
 function passesBudgetSanity(budget, price) {
@@ -28,15 +34,13 @@ function passesBudgetSanity(budget, price) {
   return price <= budget * BUDGET_SANITY_MULTIPLE;
 }
 
-// Decide what to do with a scored candidate given the shop's thresholds.
 function routeByScore(score, config) {
   if (score >= config.autoNotifyScore) return "notify";
   if (score >= config.reviewScore) return "review";
   return "drop";
 }
 
-// The hard-required (defining) keywords for a request: curated map first, then
-// the AI's per-request classification, then catalog-rarity. Soft tags removed.
+// Hard-required (defining) keywords: curated map, then AI, then catalog-rarity.
 function requiredKeywords(request, weights, aiRequired) {
   const curated = request.keywords.filter(isMustHaveTag);
   const base =
@@ -48,6 +52,23 @@ function requiredKeywords(request, weights, aiRequired) {
           ? definingKeywords(request.keywords, weights)
           : [];
   return base.filter((k) => !isSoftCategory(k));
+}
+
+// Get (and lazily persist) a request's query embedding.
+async function getRequestEmbedding(request) {
+  if (Array.isArray(request.embedding) && request.embedding.length) {
+    return request.embedding;
+  }
+  if (!hasEmbeddingKey()) return null;
+  const text = buildRequestText(request);
+  if (!text.trim()) return null;
+  const vec = await embedText(text, "query").catch(() => null);
+  if (vec) {
+    await prisma.request
+      .update({ where: { id: request.id }, data: { embedding: vec } })
+      .catch(() => {});
+  }
+  return vec;
 }
 
 function upsertMatch(shop, request, product, fields) {
@@ -63,7 +84,6 @@ function upsertMatch(shop, request, product, fields) {
       productTitle: product.title,
       productPrice: product.price,
       productImage: product.image,
-      // NOTE: never reset `declined` or `confirmedAt` — staff decisions stick.
     },
     create: {
       shop,
@@ -81,28 +101,19 @@ function upsertMatch(shop, request, product, fields) {
   });
 }
 
-// Stage 2: when enabled, ask the LLM to judge a borderline (review-band) match.
-// A confident yes promotes it to a direct notification; a no drops it.
-// Returns { route, reasoning } — never throws (falls back to the stage-1 route).
-async function applyStage2(config, request, product, score, matchedKeywords, route) {
+async function applyStage2(config, request, product, matchedKeywords, route) {
   if (!config.stage2Enabled || route !== "review") return { route, reasoning: null };
-  const verdict = await judgeMatch({ request, product, matchedKeywords }).catch(
-    () => null,
-  );
+  const verdict = await judgeMatch({ request, product, matchedKeywords }).catch(() => null);
   if (!verdict) return { route, reasoning: null };
-  if (verdict.match && verdict.confidence >= 0.8) {
-    return { route: "notify", reasoning: verdict.reasoning };
-  }
-  if (!verdict.match && verdict.confidence >= 0.8) {
-    return { route: "drop", reasoning: verdict.reasoning };
-  }
+  if (verdict.match && verdict.confidence >= 0.8) return { route: "notify", reasoning: verdict.reasoning };
+  if (!verdict.match && verdict.confidence >= 0.8) return { route: "drop", reasoning: verdict.reasoning };
   return { route: "review", reasoning: verdict.reasoning };
 }
 
 /**
- * When a new request is created: scan every in-stock product, score with the
- * IDF-weighted matcher, and route each candidate to notify / review / drop.
- * Sends one summary email covering the auto-notify matches only.
+ * Create flow: Stage 1 hard filter + Stage 2 semantic ranking over the catalog's
+ * stored embeddings. Keyword/IDF scoring is kept only as a fallback for products
+ * without an embedding.
  */
 export async function runMatchesForRequest(admin, request, aiRequired = null) {
   const products = await fetchInStockProducts(admin);
@@ -114,10 +125,19 @@ export async function runMatchesForRequest(admin, request, aiRequired = null) {
   });
   const declinedProductIds = new Set(declinedMatches.map((m) => m.productId));
 
+  // Stage 1 inputs
+  const reqAttrs = extractRequestAttributes(request);
+  // Fallback keyword scoring inputs (only used when an embedding is missing)
   const weights = computeKeywordWeights(request.keywords, products);
   const required = requiredKeywords(request, weights, aiRequired);
-  // Stage 1 hard filter: metal color, item type, brand dealbreakers.
-  const reqAttrs = extractRequestAttributes(request);
+
+  // Stage 2 inputs
+  const reqVec = await getRequestEmbedding(request);
+  const embRows = await prisma.productEmbedding.findMany({
+    where: { shop: request.shop },
+    select: { productId: true, embedding: true },
+  });
+  const embById = new Map(embRows.map((e) => [e.productId, e.embedding]));
 
   const ops = [];
   const notifyProducts = [];
@@ -125,37 +145,33 @@ export async function runMatchesForRequest(admin, request, aiRequired = null) {
   for (const product of products) {
     if (declinedProductIds.has(product.id)) continue;
     if (!passesBudgetSanity(request.budget, product.price)) continue;
+    // Stage 1 hard filter
     if (!passesHardFilters(reqAttrs, extractProductAttributes(product)).pass) continue;
 
-    const { score: kwScore, matchedKeywords } = weightedMatch(
-      request.keywords,
-      weights,
-      product.tags,
-      product.title,
-      required,
-    );
-    if (kwScore <= 0 || matchedKeywords.length === 0) continue;
+    // Keyword overlap, for display chips only (not ranking).
+    const overlap = computeMatch(request.keywords, product.tags, product.title);
+    let matchedKeywords = overlap.matchedKeywords;
 
-    const priceProx = priceProximity(request.budget, product.price);
-    const score = blendScore(kwScore, priceProx);
+    // Stage 2 ranking
+    const prodVec = embById.get(product.id);
+    let score;
+    if (reqVec && prodVec) {
+      score = similarityToScore(cosineSimilarity(reqVec, prodVec));
+    } else {
+      const wm = weightedMatch(request.keywords, weights, product.tags, product.title, required);
+      score = wm.score;
+      matchedKeywords = wm.matchedKeywords;
+      if (wm.score <= 0 || wm.matchedKeywords.length === 0) continue;
+    }
+
     let route = routeByScore(score, config);
     if (route === "drop") continue;
-
     let reasoning = null;
-    ({ route, reasoning } = await applyStage2(
-      config, request, product, score, matchedKeywords, route,
-    ));
+    ({ route, reasoning } = await applyStage2(config, request, product, matchedKeywords, route));
     if (route === "drop") continue;
 
     const needsReview = route === "review";
-    ops.push(
-      upsertMatch(request.shop, request, product, {
-        score,
-        matchedKeywords,
-        needsReview,
-        reasoning,
-      }),
-    );
+    ops.push(upsertMatch(request.shop, request, product, { score, matchedKeywords, needsReview, reasoning }));
     if (!needsReview) {
       notifyProducts.push({
         productTitle: product.title,
@@ -169,8 +185,6 @@ export async function runMatchesForRequest(admin, request, aiRequired = null) {
 
   await Promise.all(ops);
 
-  // Email covers only the high-confidence (auto-notify) matches. Review-queue
-  // matches wait for staff confirmation.
   if (notifyProducts.length > 0 && process.env.RESEND_API_KEY) {
     sendMatchSummaryEmail({
       salespersonName: request.salespersonName,
@@ -191,18 +205,37 @@ export async function runMatchesForRequest(admin, request, aiRequired = null) {
   return ops.length;
 }
 
+// Embed an incoming product and persist it, returning the vector (or null).
+async function upsertProductEmbedding(shop, product) {
+  if (!hasEmbeddingKey()) return null;
+  const text = buildProductText(product);
+  if (!text.trim()) return null;
+  const hash = textHash(text);
+  const existing = await prisma.productEmbedding.findUnique({
+    where: { productId: product.id },
+    select: { hash: true, embedding: true },
+  });
+  if (existing && existing.hash === hash) return existing.embedding;
+  const vec = await embedText(text, "document").catch(() => null);
+  if (!vec) return existing?.embedding ?? null;
+  await prisma.productEmbedding
+    .upsert({
+      where: { productId: product.id },
+      update: { hash, embedding: vec, title: product.title, price: product.price, image: product.image },
+      create: { shop, productId: product.id, hash, embedding: vec, title: product.title, price: product.price, image: product.image },
+    })
+    .catch(() => {});
+  return vec;
+}
+
 /**
- * When a product is created/updated via webhook: check it against open requests
- * and route each candidate. Applies the same HARD facet filter as the create
- * flow (item type / brand / motif / material / gemstone must match), then scores
- * the soft overlap. Emails only brand-new auto-notify pairings.
+ * Webhook flow: facet/embed the incoming product, hard-filter it against open
+ * requests, then rank by semantic similarity. Emails brand-new auto-notify pairs.
  */
 export async function matchProductAgainstRequests(shop, product) {
-  // Out-of-stock or inactive → remove stale non-declined matches silently.
   if (!product || (product.totalInventory != null && product.totalInventory <= 0)) {
-    await prisma.match.deleteMany({
-      where: { shop, productId: product.id, declined: false },
-    });
+    await prisma.match.deleteMany({ where: { shop, productId: product.id, declined: false } });
+    await prisma.productEmbedding.deleteMany({ where: { productId: product.id } }).catch(() => {});
     return 0;
   }
 
@@ -217,52 +250,42 @@ export async function matchProductAgainstRequests(shop, product) {
   });
   const existingByRequestId = new Map(existing.map((m) => [m.requestId, m]));
 
+  const prodAttrs = extractProductAttributes(product);
+  const prodVec = await upsertProductEmbedding(shop, product);
+
   const ops = [];
   const newNotifyPairs = [];
-  const prodAttrs = extractProductAttributes(product);
 
   for (const request of requests) {
     if (existingByRequestId.get(request.id)?.declined) continue;
     if (!passesBudgetSanity(request.budget, product.price)) continue;
     if (!request.keywords || request.keywords.length === 0) continue;
-    // Stage 1 hard filter: metal color, item type, brand dealbreakers.
+    // Stage 1 hard filter
     if (!passesHardFilters(extractRequestAttributes(request), prodAttrs).pass) continue;
 
-    // Unweighted soft score (no catalog corpus in the webhook), but apply the
-    // deterministic HARD facet filter so a shared common tag can't match.
-    const { matchedKeywords } = computeMatch(
-      request.keywords,
-      product.tags,
-      product.title,
-    );
+    const overlap = computeMatch(request.keywords, product.tags, product.title);
+    let matchedKeywords = overlap.matchedKeywords;
     const required = requiredKeywords(request, null, null);
-    const satisfiesRequired = required.every((k) => matchedKeywords.includes(k));
-    if (required.length > 0 && !satisfiesRequired) continue;
-    if (matchedKeywords.length === 0) continue;
+    if (required.length > 0 && !required.every((k) => matchedKeywords.includes(k))) continue;
 
-    const kwScore = Math.round(
-      (matchedKeywords.length / request.keywords.length) * 100,
-    );
-    const priceProx = priceProximity(request.budget, product.price);
-    const score = blendScore(kwScore, priceProx);
+    // Stage 2 ranking
+    const reqVec = await getRequestEmbedding(request);
+    let score;
+    if (reqVec && prodVec) {
+      score = similarityToScore(cosineSimilarity(reqVec, prodVec));
+    } else {
+      if (matchedKeywords.length === 0) continue;
+      score = Math.round((matchedKeywords.length / request.keywords.length) * 100);
+    }
+
     let route = routeByScore(score, config);
     if (route === "drop") continue;
-
     let reasoning = null;
-    ({ route, reasoning } = await applyStage2(
-      config, request, product, score, matchedKeywords, route,
-    ));
+    ({ route, reasoning } = await applyStage2(config, request, product, matchedKeywords, route));
     if (route === "drop") continue;
 
     const needsReview = route === "review";
-    ops.push(
-      upsertMatch(shop, request, product, {
-        score,
-        matchedKeywords,
-        needsReview,
-        reasoning,
-      }),
-    );
+    ops.push(upsertMatch(shop, request, product, { score, matchedKeywords, needsReview, reasoning }));
     if (!needsReview && !existingByRequestId.has(request.id)) {
       newNotifyPairs.push({ request, score, matchedKeywords });
     }
@@ -270,7 +293,6 @@ export async function matchProductAgainstRequests(shop, product) {
 
   await Promise.all(ops);
 
-  // Email only brand-new auto-notify pairings.
   if (process.env.RESEND_API_KEY) {
     for (const { request, score, matchedKeywords } of newNotifyPairs) {
       sendNewProductMatchEmail({

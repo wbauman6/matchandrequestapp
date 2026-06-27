@@ -129,8 +129,8 @@ model ShopConfig {
   // Matches scoring >= autoNotifyScore notify the salesperson directly.
   // Matches scoring >= reviewScore but < autoNotifyScore go to the review queue.
   // Below reviewScore are dropped.
-  autoNotifyScore Int      @default(45)
-  reviewScore     Int      @default(25)
+  autoNotifyScore Int      @default(50)
+  reviewScore     Int      @default(40)
   // When enabled, borderline (review-band) matches are additionally judged by a
   // single structured LLM call before being queued/notified.
   stage2Enabled   Boolean  @default(false)

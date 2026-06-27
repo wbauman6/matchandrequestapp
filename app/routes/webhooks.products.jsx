@@ -43,11 +43,17 @@ export const action = async ({ request }) => {
   // If the product was set to draft/archived, treat as removed
   const isActive = !payload.status || payload.status === "active";
 
+  const description = String(payload.body_html || "")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
   const product = {
     id: gid,
     title: payload.title || "",
     productType: payload.product_type || "",
     vendor: payload.vendor || "",
+    description,
     tags,
     price,
     image,
