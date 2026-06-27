@@ -5,7 +5,12 @@ import {
   extractProductAttributes,
   extractRequestAttributes,
   passesHardFilters,
+  extractBrand,
+  normalizeBrand,
+  extractItemType,
+  normalizeItemType,
 } from "../app/lib/attributes.js";
+import { deriveFacets } from "../app/lib/facets.js";
 
 const SHOP = process.argv[2] || "walter-bauman-jewelers.myshopify.com";
 const { Client } = pkg;
@@ -79,6 +84,26 @@ for (const [k, v] of Object.entries(metalCounts).sort((a, b) => b[1] - a[1]))
 console.log("\nITEM TYPE DISTRIBUTION:");
 for (const [k, v] of Object.entries(typeCounts).sort((a, b) => b[1] - a[1]))
   console.log(`  ${k}: ${v}`);
+
+// ---- How much does reading the TITLE add over tags? ----
+let titleAddsBrand = 0;
+let titleAddsType = 0;
+for (const p of products) {
+  const brandTitle = extractBrand([p.title]);
+  const brandTags =
+    normalizeBrand(deriveFacets(p.tags).brand) ||
+    extractBrand([...p.tags, p.productType, p.vendor]);
+  if (brandTitle && !brandTags) titleAddsBrand++;
+
+  const typeTitle = extractItemType([p.title]);
+  const typeTags =
+    normalizeItemType(deriveFacets(p.tags).item_type) ||
+    extractItemType([...p.tags, p.productType]);
+  if (typeTitle && !typeTags) titleAddsType++;
+}
+console.log("\nTITLE READING ADDS (detectable in title, missing from tags):");
+console.log("  brand:", pct(titleAddsBrand));
+console.log("  item type:", pct(titleAddsType));
 
 // ---- CHECKPOINT: "yellow gold ring" request ----
 const req = extractRequestAttributes({

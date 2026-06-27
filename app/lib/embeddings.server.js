@@ -15,7 +15,10 @@ export function textHash(text) {
 
 export function buildProductText(product) {
   const tags = (product.tags || []).join(", ");
-  return [product.title, product.description, tags]
+  const title = product.title || "";
+  // Weight the title heavily (repeat it) so title-similar products surface even
+  // when tags/description are thin or missing.
+  return [title, title, title, product.description, tags]
     .filter(Boolean)
     .join(". ")
     .slice(0, 8000);

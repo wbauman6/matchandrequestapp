@@ -186,24 +186,61 @@ export function stylePasses(reqStyles, prodStyles) {
 }
 
 // ---- Brand -----------------------------------------------------------------
-// Alias map for the brands the store actually carries. Extend as needed.
-
+//
+// LONGEST / MOST-SPECIFIC MATCH WINS. Order matters: multi-word brands and
+// nested names MUST appear before their substrings, because extraction returns
+// the FIRST match. "Grand Seiko" is a different brand from "Seiko", so it is
+// listed first — a "Grand Seiko" title resolves to "grand seiko" and never
+// falls through to "seiko".
+//
+// >>> EDIT THIS LIST to add/remove brands. Keep specific names above their
+//     substrings (e.g. "grand seiko" before "seiko"). <<<
 const BRAND_ALIASES = [
+  // --- nested / multi-word first ---
+  ["grand seiko", /\bgrand\s+seiko\b/i],
   ["tiffany & co.", /\btiffany\b/i],
-  ["cartier", /\bcartier\b/i],
-  ["david yurman", /\bdavid\s*yurman\b|\byurman\b/i],
-  ["rolex", /\brolex\b/i],
   ["van cleef & arpels", /\bvan\s*cleef\b|\bvca\b/i],
-  ["bvlgari", /\bbvlgari\b|\bbulgari\b/i],
-  ["chopard", /\bchopard\b/i],
-  ["mikimoto", /\bmikimoto\b/i],
+  ["patek philippe", /\bpatek(?:\s+philippe)?\b/i],
+  ["audemars piguet", /\baudemars(?:\s+piguet)?\b/i],
+  ["tag heuer", /\btag\s*heuer\b/i],
+  ["david yurman", /\bdavid\s*yurman\b|\byurman\b/i],
   ["john hardy", /\bjohn\s*hardy\b/i],
   ["elsa peretti", /\belsa\s*peretti\b|\bperetti\b/i],
   ["charles garnier", /\bcharles\s*garnier\b/i],
+  // --- single-word brands ---
+  ["rolex", /\brolex\b/i],
+  ["omega", /\bomega\b/i],
+  ["seiko", /\bseiko\b/i], // MUST stay below "grand seiko"
+  ["tudor", /\btudor\b/i],
+  ["breitling", /\bbreitling\b/i],
+  ["cartier", /\bcartier\b/i],
+  ["bvlgari", /\bbvlgari\b|\bbulgari\b/i],
+  ["chopard", /\bchopard\b/i],
+  ["mikimoto", /\bmikimoto\b/i],
   ["michele", /\bmichele\b/i],
   ["g-shock", /\bg[\s-]?shock\b/i],
   ["disney", /\bdisney\b/i],
 ];
+
+// Watch-primary brands: if a request/product names one of these, item type is
+// inferred as "watch" even when the word "watch" is absent. EXCLUDES makers that
+// produce both watches AND jewelry (Cartier, Tiffany, Bvlgari, Chopard) — those
+// must not blindly imply watch.
+//
+// >>> EDIT THIS LIST to add/remove watch-primary brands. <<<
+export const WATCH_BRANDS = new Set([
+  "rolex",
+  "omega",
+  "seiko",
+  "grand seiko",
+  "tag heuer",
+  "tudor",
+  "breitling",
+  "patek philippe",
+  "audemars piguet",
+  "g-shock",
+  "michele",
+]);
 
 export function normalizeBrand(value) {
   if (!value) return null;
@@ -231,30 +268,41 @@ export function brandPasses(reqBrand, prodBrand) {
 
 // ---- Combined extraction ---------------------------------------------------
 
+// Infer item type = watch for watch-primary brands when no type was found.
+function applyWatchBrandImplication(attrs) {
+  if (!attrs.itemType && attrs.brand && WATCH_BRANDS.has(attrs.brand)) {
+    attrs.itemType = "watch";
+  }
+  return attrs;
+}
+
 export function extractProductAttributes(product) {
+  const title = product.title || "";
   const tags = product.tags || [];
-  const strings = [product.title, product.productType, product.vendor, product.description, ...tags];
   const facets = deriveFacets(tags);
-  return {
-    metal: extractMetal(strings),
-    itemType:
-      normalizeItemType(facets.item_type) || extractItemType(strings),
-    brand: normalizeBrand(facets.brand) || extractBrand(strings),
-    styles: extractStyles(strings),
+  const allStrings = [title, product.productType, product.vendor, product.description, ...tags];
+  // Title is the PRIMARY source for brand and item type, then tags, then the rest.
+  const attrs = {
+    metal: extractMetal(allStrings),
+    itemType: extractItemType([title]) || normalizeItemType(facets.item_type) || extractItemType(allStrings),
+    brand: extractBrand([title]) || normalizeBrand(facets.brand) || extractBrand(allStrings),
+    styles: extractStyles(allStrings),
   };
+  return applyWatchBrandImplication(attrs);
 }
 
 export function extractRequestAttributes(request) {
+  const description = request.description || "";
   const keywords = request.keywords || [];
-  const strings = [request.description, ...keywords];
   const facets = deriveFacets(keywords);
-  return {
-    metal: extractMetal(strings),
-    itemType:
-      normalizeItemType(facets.item_type) || extractItemType(strings),
-    brand: normalizeBrand(facets.brand) || extractBrand(strings),
-    styles: extractStyles(strings),
+  const allStrings = [description, ...keywords];
+  const attrs = {
+    metal: extractMetal(allStrings),
+    itemType: extractItemType([description]) || normalizeItemType(facets.item_type) || extractItemType(allStrings),
+    brand: extractBrand([description]) || normalizeBrand(facets.brand) || extractBrand(allStrings),
+    styles: extractStyles(allStrings),
   };
+  return applyWatchBrandImplication(attrs);
 }
 
 /**

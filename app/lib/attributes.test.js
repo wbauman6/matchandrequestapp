@@ -84,6 +84,44 @@ test("brand normalization and gating", () => {
   assert.equal(brandPasses(null, "cartier"), true);
 });
 
+test("nested brands: longest match wins (Grand Seiko != Seiko)", () => {
+  assert.equal(extractBrand(["Grand Seiko SBGA211 Snowflake"]), "grand seiko");
+  assert.equal(extractBrand(["Men's Seiko Presage Automatic"]), "seiko");
+  // dealbreaker: the two are distinct, both directions
+  assert.equal(brandPasses("seiko", "grand seiko"), false);
+  assert.equal(brandPasses("grand seiko", "seiko"), false);
+  assert.equal(brandPasses("seiko", "seiko"), true);
+  // Tiffany variants normalize to one canonical
+  assert.equal(extractBrand(["Estate Tiffany & Co. Heart Bracelet"]), "tiffany & co.");
+});
+
+test("watch-primary brands imply item type = watch; dual makers do not", () => {
+  const rolex = extractRequestAttributes({ description: "Rolex", keywords: [] });
+  assert.equal(rolex.brand, "rolex");
+  assert.equal(rolex.itemType, "watch"); // implied
+
+  const gs = extractRequestAttributes({ description: "grand seiko snowflake", keywords: [] });
+  assert.equal(gs.brand, "grand seiko");
+  assert.equal(gs.itemType, "watch");
+
+  // Dual makers must NOT auto-imply watch
+  const cartier = extractRequestAttributes({ description: "Cartier", keywords: [] });
+  assert.equal(cartier.brand, "cartier");
+  assert.equal(cartier.itemType, null);
+  const tiffany = extractRequestAttributes({ description: "Tiffany bracelet", keywords: [] });
+  assert.equal(tiffany.itemType, "bracelet"); // explicit type wins, not watch
+});
+
+test("title is the primary source for brand/type (beats missing tags)", () => {
+  // No tags at all — everything must come from the title.
+  const p = extractProductAttributes({
+    title: "Grand Seiko SBGA211 Snowflake",
+    tags: [],
+  });
+  assert.equal(p.brand, "grand seiko");
+  assert.equal(p.itemType, "watch"); // implied from watch brand
+});
+
 test("ACCEPTANCE: 'yellow gold ring' filters out white gold and non-rings", () => {
   const req = extractRequestAttributes({
     description: "yellow gold ring",

@@ -70,12 +70,16 @@ async function demo(query) {
   console.log(`  attrs: metal=${reqAttrs.metal} type=${reqAttrs.itemType} brand=${reqAttrs.brand} styles=[${reqStyles.join(", ")}]`);
   console.log(`  survivors after hard + style filter: ${pool.length} of ${products.length}${note}`);
   console.log(`  top 15 by semantic similarity:`);
-  for (const { p, score } of ranked.slice(0, 15)) {
+  for (const { p, score } of ranked.slice(0, 12)) {
     const price = p.price != null ? `$${p.price}` : "—";
-    console.log(`   ${String(score).padStart(3)}  ${price.padStart(9)}  [${p.attrs.styles.join(",") || "-"}]  ${p.title}`);
+    const a = p.attrs;
+    console.log(`   ${String(score).padStart(3)}  ${price.padStart(9)}  [brand=${a.brand || "-"} type=${a.itemType || "-"}]  ${p.title}`);
   }
 }
 
-await demo("diamond cluster");
-await demo("elegant diamond ring");
+await demo("Seiko");
+await demo("Grand Seiko");
+await demo("Rolex");
+await demo("grand seiko snowflake");
+await demo("seiko presage automatic"); // title-semantic surfacing on an existing product
 process.exit(0);
