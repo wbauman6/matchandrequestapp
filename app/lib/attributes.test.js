@@ -8,6 +8,8 @@ import {
   itemTypePasses,
   extractBrand,
   brandPasses,
+  extractStyles,
+  stylePasses,
   extractProductAttributes,
   extractRequestAttributes,
   passesHardFilters,
@@ -106,6 +108,31 @@ test("ACCEPTANCE: 'yellow gold ring' filters out white gold and non-rings", () =
   assert.equal(passesHardFilters(req, yellowRing).pass, true);
   assert.equal(passesHardFilters(req, whiteRing).pass, false);
   assert.equal(passesHardFilters(req, yellowBracelet).pass, false);
+});
+
+test("extractStyles detects defining styles + variants, ignores vague terms", () => {
+  assert.deepEqual(extractStyles(["Diamond Cluster Ring"]), ["cluster"]);
+  assert.deepEqual(extractStyles(["clustered diamond pendant"]), ["cluster"]);
+  assert.deepEqual(extractStyles(["Halo-Set Engagement Ring"]), ["halo"]);
+  assert.deepEqual(extractStyles(["Pavé Eternity Band"]).sort(), ["eternity", "pave"]);
+  assert.deepEqual(extractStyles(["elegant classic simple diamond ring"]), []);
+  assert.deepEqual(extractStyles(["3-stone diamond ring"]), ["three-stone"]);
+});
+
+test("stylePasses requires all named defining styles (AND)", () => {
+  assert.equal(stylePasses(["cluster"], ["cluster"]), true);
+  assert.equal(stylePasses(["cluster"], ["halo"]), false);
+  assert.equal(stylePasses(["cluster"], []), false);
+  assert.equal(stylePasses([], ["halo"]), true); // none required -> pass
+  assert.equal(stylePasses(["cluster", "halo"], ["cluster"]), false); // AND
+  assert.equal(stylePasses(["cluster", "halo"], ["cluster", "halo"]), true);
+});
+
+test("ACCEPTANCE: 'diamond cluster' is a defining style; 'elegant' is not", () => {
+  const cluster = extractRequestAttributes({ description: "diamond cluster", keywords: [] });
+  assert.deepEqual(cluster.styles, ["cluster"]);
+  const elegant = extractRequestAttributes({ description: "elegant diamond ring", keywords: [] });
+  assert.deepEqual(elegant.styles, []); // vague -> no hard style filter
 });
 
 test("no request attributes -> everything passes (filters are opt-in)", () => {

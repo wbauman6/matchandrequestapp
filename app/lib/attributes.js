@@ -128,6 +128,63 @@ export function itemTypePasses(reqType, prodType) {
   return reqType === prodType;
 }
 
+// ---- Style (defining vs vague) ---------------------------------------------
+//
+// DEFINING styles are specific, recognizable constructions/settings. When a
+// request names one, it becomes MANDATORY — a product without that style is the
+// wrong item, not just a weaker match. Keep this list SMALL and conservative;
+// it's meant to be edited as behavior is observed. Each entry maps a canonical
+// style to a regex matching its variants (in title/tags/description).
+//
+// >>> EDIT THIS LIST to add/remove defining style terms. <<<
+export const DEFINING_STYLE_RULES = [
+  ["cluster", /\bcluster(?:s|ed)?\b/i],
+  ["halo", /\bhalo(?:[\s-]?set)?\b/i],
+  ["solitaire", /\bsolitaires?\b/i],
+  ["three-stone", /\b(?:three[\s-]?stone|3[\s-]?stone|trilogy|past present future)\b/i],
+  ["eternity", /\beternity\b/i],
+  ["tennis", /\btennis\b/i],
+  ["signet", /\bsignets?\b/i],
+  ["pave", /\bpave\b|pavé/i],
+  ["channel-set", /\bchannel[\s-]?set\b/i],
+  ["bezel", /\bbezel(?:[\s-]?set)?\b/i],
+  ["stud", /\bstuds?\b/i],
+  ["hoop", /\bhoops?\b/i],
+  ["huggie", /\bhuggies?\b/i],
+  ["riviera", /\briviera\b/i],
+];
+
+// VAGUE descriptors stay SOFT (semantic ranking only) — never hard filters.
+// Listed here only for clarity/documentation; they are simply absent from the
+// defining list, so they're never treated as mandatory.
+export const VAGUE_STYLE_TERMS = [
+  "classic", "elegant", "simple", "modern", "vintage-inspired",
+  "pretty", "delicate", "statement", "fancy", "unique", "beautiful",
+];
+
+// All defining styles present in a set of strings (a product's text or a
+// request's text). Returns canonical style names.
+export function extractStyles(strings) {
+  const text = strings.filter(Boolean).join(" | ").toLowerCase();
+  if (!text.trim()) return [];
+  const found = [];
+  for (const [style, re] of DEFINING_STYLE_RULES) {
+    if (re.test(text)) found.push(style);
+  }
+  return found;
+}
+
+/**
+ * Style hard filter. `reqStyles` are the defining styles named in the request.
+ * A product must have ALL of them (AND). If requiring all yields nothing, the
+ * caller can retry requiring only the most specific one (see requiredStyles).
+ */
+export function stylePasses(reqStyles, prodStyles) {
+  if (!reqStyles || reqStyles.length === 0) return true;
+  const have = new Set(prodStyles);
+  return reqStyles.every((s) => have.has(s));
+}
+
 // ---- Brand -----------------------------------------------------------------
 // Alias map for the brands the store actually carries. Extend as needed.
 
@@ -176,13 +233,14 @@ export function brandPasses(reqBrand, prodBrand) {
 
 export function extractProductAttributes(product) {
   const tags = product.tags || [];
-  const strings = [product.title, product.productType, product.vendor, ...tags];
+  const strings = [product.title, product.productType, product.vendor, product.description, ...tags];
   const facets = deriveFacets(tags);
   return {
     metal: extractMetal(strings),
     itemType:
       normalizeItemType(facets.item_type) || extractItemType(strings),
     brand: normalizeBrand(facets.brand) || extractBrand(strings),
+    styles: extractStyles(strings),
   };
 }
 
@@ -195,6 +253,7 @@ export function extractRequestAttributes(request) {
     itemType:
       normalizeItemType(facets.item_type) || extractItemType(strings),
     brand: normalizeBrand(facets.brand) || extractBrand(strings),
+    styles: extractStyles(strings),
   };
 }
 

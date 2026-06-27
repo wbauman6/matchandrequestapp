@@ -13,6 +13,7 @@ import {
   extractRequestAttributes,
   extractProductAttributes,
   passesHardFilters,
+  stylePasses,
 } from "./attributes.js";
 import {
   embedText,
@@ -139,15 +140,44 @@ export async function runMatchesForRequest(admin, request, aiRequired = null) {
   });
   const embById = new Map(embRows.map((e) => [e.productId, e.embedding]));
 
-  const ops = [];
-  const notifyProducts = [];
-
+  // Stage 1 (metal/type/brand) — compute product attributes once.
+  let candidates = [];
   for (const product of products) {
     if (declinedProductIds.has(product.id)) continue;
     if (!passesBudgetSanity(request.budget, product.price)) continue;
-    // Stage 1 hard filter
-    if (!passesHardFilters(reqAttrs, extractProductAttributes(product)).pass) continue;
+    const prodAttrs = extractProductAttributes(product);
+    if (!passesHardFilters(reqAttrs, prodAttrs).pass) continue;
+    candidates.push({ product, prodAttrs });
+  }
 
+  // Stage 1.5 — defining-style requirement. If the request names defining styles
+  // (e.g. "cluster"), keep only products that have ALL of them. If requiring all
+  // yields nothing, fall back to the most specific (rarest in the pool) one.
+  const reqStyles = reqAttrs.styles || [];
+  if (reqStyles.length > 0) {
+    let kept = candidates.filter((c) =>
+      reqStyles.every((s) => c.prodAttrs.styles.includes(s)),
+    );
+    let applied = reqStyles;
+    if (kept.length === 0 && reqStyles.length > 1) {
+      const freq = {};
+      for (const c of candidates)
+        for (const s of c.prodAttrs.styles)
+          if (reqStyles.includes(s)) freq[s] = (freq[s] || 0) + 1;
+      const mostSpecific = [...reqStyles].sort((a, b) => (freq[a] || 0) - (freq[b] || 0))[0];
+      applied = [mostSpecific];
+      kept = candidates.filter((c) => c.prodAttrs.styles.includes(mostSpecific));
+      console.log(
+        `[match] request ${request.id}: no product had all styles [${reqStyles.join(", ")}]; fell back to most specific "${mostSpecific}"`,
+      );
+    }
+    candidates = kept;
+  }
+
+  const ops = [];
+  const notifyProducts = [];
+
+  for (const { product } of candidates) {
     // Keyword overlap, for display chips only (not ranking).
     const overlap = computeMatch(request.keywords, product.tags, product.title);
     let matchedKeywords = overlap.matchedKeywords;
@@ -260,8 +290,11 @@ export async function matchProductAgainstRequests(shop, product) {
     if (existingByRequestId.get(request.id)?.declined) continue;
     if (!passesBudgetSanity(request.budget, product.price)) continue;
     if (!request.keywords || request.keywords.length === 0) continue;
-    // Stage 1 hard filter
-    if (!passesHardFilters(extractRequestAttributes(request), prodAttrs).pass) continue;
+    // Stage 1 hard filter (metal/type/brand)
+    const reqAttrs = extractRequestAttributes(request);
+    if (!passesHardFilters(reqAttrs, prodAttrs).pass) continue;
+    // Stage 1.5 defining-style requirement (strict AND for a single product)
+    if (!stylePasses(reqAttrs.styles, prodAttrs.styles)) continue;
 
     const overlap = computeMatch(request.keywords, product.tags, product.title);
     let matchedKeywords = overlap.matchedKeywords;
