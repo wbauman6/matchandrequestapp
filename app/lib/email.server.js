@@ -12,8 +12,9 @@ function getClient() {
   return client;
 }
 
+// Must be an address at the Resend-verified domain (walterbauman.com).
 const FROM =
-  process.env.RESEND_FROM_EMAIL || "onboarding@resend.dev";
+  process.env.RESEND_FROM_EMAIL || "notifications@walterbauman.com";
 
 function scoreStyle(score) {
   if (score >= 70) return { bg: "#e3f1df", color: "#1a7a4a" };
