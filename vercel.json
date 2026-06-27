@@ -11,6 +11,7 @@
     { "source": "/(.*)", "destination": "/api/handler.js" }
   ],
   "crons": [
-    { "path": "/api/reminders", "schedule": "0 14 * * *" }
+    { "path": "/api/reminders", "schedule": "0 14 * * *" },
+    { "path": "/api/check-products", "schedule": "30 13 * * *" }
   ]
 }
