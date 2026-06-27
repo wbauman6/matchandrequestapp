@@ -48,6 +48,7 @@ model Request {
   // and to enable item_type-indexed candidate lookup.
   facets           Json?
   itemType         String?
+  embedding        Json?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
   matches          Match[]
@@ -105,6 +106,20 @@ model Salesperson {
   createdAt DateTime @default(now())
 
   @@unique([shop, email])
+  @@index([shop])
+}
+
+model ProductEmbedding {
+  id        String   @id @default(cuid())
+  shop      String
+  productId String   @unique
+  hash      String
+  embedding Json
+  title     String?
+  price     Float?
+  image     String?
+  updatedAt DateTime @updatedAt
+
   @@index([shop])
 }
 

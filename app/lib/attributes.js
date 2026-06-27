@@ -17,9 +17,11 @@ const TWO_TONE_RE =
   /\b(two[\s-]?tone|tri[\s-]?(?:color|colour|tone)|tricolou?r|multi[\s-]?(?:tone|color|colour))\b/i;
 
 const GOLD_COLOR_RES = {
-  yellow_gold: /\byellow\s*gold\b|\b(?:\d{1,2}k?\s*)?yg\b|\byellow\s*(?:14|18|10)k\b/i,
-  white_gold: /\bwhite\s*gold\b|\bwg\b/i,
-  rose_gold: /\b(?:rose|pink)\s*gold\b|\brg\b/i,
+  // Includes this store's title abbreviations: "Y Gold", "W Gold", "R Gold",
+  // and plated forms YGP / WGP / RGP.
+  yellow_gold: /\byellow\s*gold\b|\byg\b|\bygp\b|\by\s+gold\b/i,
+  white_gold: /\bwhite\s*gold\b|\bwg\b|\bwgp\b|\bw\s+gold\b/i,
+  rose_gold: /\b(?:rose|pink)\s*gold\b|\brg\b|\brgp\b|\br\s+gold\b|\bp\s+gold\b/i,
 };
 
 const OTHER_METAL_RES = {

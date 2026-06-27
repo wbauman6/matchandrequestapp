@@ -25,6 +25,13 @@ test("extractMetal normalizes colors and variants", () => {
   assert.equal(extractMetal(["diamond ring"]), "unknown");
 });
 
+test("extractMetal handles store title abbreviations (Y/W/R Gold, YGP)", () => {
+  assert.equal(extractMetal(["14K Y Gold 5mm Wedding Band"]), "yellow_gold");
+  assert.equal(extractMetal(["18K W Gold Diamond Ring"]), "white_gold");
+  assert.equal(extractMetal(["14K R Gold Heart Pendant"]), "rose_gold");
+  assert.equal(extractMetal(["YGP Coin Band"]), "yellow_gold");
+});
+
 test("extractMetal detects two-tone (explicit or multiple colors)", () => {
   assert.equal(extractMetal(["Two-Tone Gold"]), "two_tone");
   assert.equal(extractMetal(["14k tri-color"]), "two_tone");

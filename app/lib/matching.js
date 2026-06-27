@@ -203,6 +203,29 @@ export function computeKeywordWeights(reqKeywords, products) {
   return weights;
 }
 
+// Cosine similarity between two equal-length numeric vectors, in [-1, 1].
+// Returns 0 for missing/empty/mismatched vectors so callers can fall back.
+export function cosineSimilarity(a, b) {
+  if (!Array.isArray(a) || !Array.isArray(b) || a.length === 0 || a.length !== b.length) {
+    return 0;
+  }
+  let dot = 0;
+  let na = 0;
+  let nb = 0;
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i];
+    na += a[i] * a[i];
+    nb += b[i] * b[i];
+  }
+  if (na === 0 || nb === 0) return 0;
+  return dot / (Math.sqrt(na) * Math.sqrt(nb));
+}
+
+// Map a cosine similarity (~[0,1] for these embeddings) to a 0-100 score.
+export function similarityToScore(sim) {
+  return Math.round(Math.max(0, Math.min(1, sim)) * 100);
+}
+
 // Price proximity as a soft signal in [0,1]: at or under budget = 1, decaying to
 // 0 at twice the budget. Neutral (1) when budget or price is unknown.
 export function priceProximity(budget, price) {
