@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { cleanRequestText } from "./requestClean.js";
 
 const VOYAGE_URL = "https://api.voyageai.com/v1/embeddings";
 const MODEL = "voyage-3";
@@ -25,8 +26,11 @@ export function buildProductText(product) {
 }
 
 export function buildRequestText(request) {
+  // Strip marketing filler + normalize brand shorthand so the embedding focuses
+  // on the meaningful terms (brand, item type, attributes).
+  const desc = cleanRequestText(request.description || "");
   const kws = (request.keywords || []).join(", ");
-  return [request.description, kws].filter(Boolean).join(". ").slice(0, 8000);
+  return [desc, kws].filter(Boolean).join(". ").slice(0, 8000);
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

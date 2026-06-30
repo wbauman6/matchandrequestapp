@@ -7,11 +7,11 @@ import {
   textHash,
   hasEmbeddingKey,
 } from "./embeddings.server.js";
-import { reasonMatches, confidenceToScore } from "./reasoningMatch.server.js";
+import { reasonMatches, verifyMatch, confidenceToScore } from "./reasoningMatch.server.js";
 import { sendMatchSummaryEmail, sendNewProductMatchEmail } from "./email.server.js";
 
 // --- Tunables -------------------------------------------------------------
-const TOP_K = 30; // candidates sent to the AI reasoning pass
+const TOP_K = 50; // candidates sent to the AI reasoning pass
 const BUDGET_TOLERANCE = 1.5; // exclude items more than this multiple over budget
 const RETRIEVAL_GATE = 0.35; // webhook: min cosine for a new product to be judged for a request
 const NEVER_EMPTY_FALLBACK = 5; // if the AI returns nothing, surface this many closest as "low"
@@ -112,7 +112,23 @@ export async function runMatchesForRequest(_admin, request) {
     budget: request.budget,
     candidates,
   });
-  // Never empty: if reasoning produced nothing, surface the closest candidates.
+
+  // Step 3b — double-check: verify each proposed match individually (stricter
+  // than judging the whole batch). Drop those that fail; keep on transient error.
+  if (matches.length > 0) {
+    const byIdC = new Map(candidates.map((c) => [c.productId, c]));
+    const checked = await Promise.all(
+      matches.map(async (m) => {
+        const c = byIdC.get(m.productId);
+        if (!c) return null;
+        const v = await verifyMatch({ description: request.description || "", product: c });
+        return v && v.match === false ? null : m;
+      }),
+    );
+    matches = checked.filter(Boolean);
+  }
+
+  // Never empty: if nothing survived, surface the closest candidates.
   if (matches.length === 0 && pool.length > 0) {
     matches = pool.slice(0, NEVER_EMPTY_FALLBACK).map((p) => ({
       productId: p.productId,
@@ -232,6 +248,13 @@ export async function matchProductAgainstRequests(shop, product) {
     });
     const m = matches.find((x) => x.productId === product.id);
     if (!m) continue;
+
+    // Double-check this specific pairing before alerting.
+    const v = await verifyMatch({
+      description: request.description || "",
+      product: { title: product.title, description: product.description, price: product.price },
+    });
+    if (v && v.match === false) continue;
 
     const needsReview = m.confidence !== "high";
     ops.push(

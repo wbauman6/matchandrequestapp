@@ -105,3 +105,57 @@ Return the JSON verdict now.`;
 export function confidenceToScore(confidence) {
   return confidence === "high" ? 90 : confidence === "medium" ? 60 : 35;
 }
+
+// A cheaper/faster model is appropriate for a single focused yes/no.
+const VERIFY_MODEL = "claude-haiku-4-5";
+
+const VERIFY_SYSTEM = `You are an expert jeweler doing a final check on ONE proposed match. You are given a customer's request and ONE product (title + description). Decide whether it should be shown to the customer.
+
+KEEP it (match=true) when the product is fundamentally the right thing:
+- BRAND: if the request names a brand, the product must be that brand (Grand Seiko is NOT Seiko; Tiffany & Co. is specific).
+- ITEM TYPE: must match (a watch for a watch request, a ring for a ring request, a bracelet for a bracelet request).
+- KEY ATTRIBUTE: it must match the customer's main explicitly-stated attribute — e.g. dial color, primary gemstone, or motif/setting (a blue-dial request needs a blue dial; a cluster request needs a cluster, not a solitaire).
+
+Do NOT reject just because of:
+- a DIFFERENT METAL or material (e.g. white vs yellow gold, steel vs gold) — keep it;
+- a missing SUB-TYPE qualifier (e.g. "dive" watch, "dress" watch) — keep it as long as it's the right brand/item type with the right key attribute.
+
+REJECT (match=false) only when it is clearly the wrong item: wrong brand, wrong item type, the key requested attribute is clearly wrong (e.g. blue dial requested but the dial is black/white/silver; cluster requested but it's a solitaire), or the product is unrelated to the request.
+
+Respond with ONLY a JSON object, no other text:
+{"match": true|false, "reason": "one short sentence"}`;
+
+/**
+ * Per-match verification (the double-check). Evaluates ONE product against the
+ * request in isolation — stricter than judging 30 at once. Returns
+ * { match: boolean, reason } or null on failure (caller keeps the item if the
+ * check couldn't run, to avoid dropping good matches on a transient error).
+ */
+export async function verifyMatch({ description, product }) {
+  const c = getClient();
+  if (!c) return null;
+  const user = `Customer request: "${description}"
+
+Product:
+- Title: ${JSON.stringify(product.title || "")}
+- Description: ${JSON.stringify((product.description || "").slice(0, 1200))}
+${product.price != null ? `- Price: $${product.price}` : ""}
+
+Does this specific product genuinely satisfy this specific request? Return the JSON now.`;
+
+  try {
+    const resp = await c.messages.create({
+      model: VERIFY_MODEL,
+      max_tokens: 200,
+      system: VERIFY_SYSTEM,
+      messages: [{ role: "user", content: user }],
+    });
+    const raw = resp.content?.[0]?.type === "text" ? resp.content[0].text : "";
+    const parsed = parseJsonObject(raw);
+    if (!parsed || typeof parsed.match !== "boolean") return null;
+    return { match: parsed.match, reason: typeof parsed.reason === "string" ? parsed.reason : "" };
+  } catch (err) {
+    console.error("verifyMatch error:", err?.message || err);
+    return null;
+  }
+}
