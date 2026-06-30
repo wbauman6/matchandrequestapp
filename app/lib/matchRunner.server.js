@@ -7,7 +7,7 @@ import {
   textHash,
   hasEmbeddingKey,
 } from "./embeddings.server.js";
-import { reasonMatches, verifyMatch, confidenceToScore } from "./reasoningMatch.server.js";
+import { reasonMatches, verifyMatch, verifySetting, namedSettings, confidenceToScore } from "./reasoningMatch.server.js";
 import { sendMatchSummaryEmail, sendNewProductMatchEmail } from "./email.server.js";
 
 // --- Tunables -------------------------------------------------------------
@@ -117,12 +117,17 @@ export async function runMatchesForRequest(_admin, request) {
   // than judging the whole batch). Drop those that fail; keep on transient error.
   if (matches.length > 0) {
     const byIdC = new Map(candidates.map((c) => [c.productId, c]));
+    const settings = namedSettings(request.description || "");
     const checked = await Promise.all(
       matches.map(async (m) => {
         const c = byIdC.get(m.productId);
         if (!c) return null;
-        const v = await verifyMatch({ description: request.description || "", product: c });
-        return v && v.match === false ? null : m;
+        const [v, s] = await Promise.all([
+          verifyMatch({ description: request.description || "", product: c }),
+          settings.length ? verifySetting({ product: c, settings }) : { match: true },
+        ]);
+        if ((v && v.match === false) || (s && s.match === false)) return null;
+        return m;
       }),
     );
     matches = checked.filter(Boolean);
@@ -249,12 +254,18 @@ export async function matchProductAgainstRequests(shop, product) {
     const m = matches.find((x) => x.productId === product.id);
     if (!m) continue;
 
-    // Double-check this specific pairing before alerting.
-    const v = await verifyMatch({
-      description: request.description || "",
-      product: { title: product.title, description: product.description, price: product.price },
-    });
-    if (v && v.match === false) continue;
+    // Double-check this specific pairing before alerting (+ strict setting gate).
+    const settings = namedSettings(request.description || "");
+    const [v, s] = await Promise.all([
+      verifyMatch({
+        description: request.description || "",
+        product: { title: product.title, description: product.description, price: product.price },
+      }),
+      settings.length
+        ? verifySetting({ product: { title: product.title, description: product.description }, settings })
+        : { match: true },
+    ]);
+    if ((v && v.match === false) || (s && s.match === false)) continue;
 
     const needsReview = m.confidence !== "high";
     ops.push(

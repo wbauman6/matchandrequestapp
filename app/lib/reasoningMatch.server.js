@@ -23,7 +23,7 @@ Rules:
 - Rank results most-relevant first (high before medium before low).
 - If nothing is a strong match, STILL return the closest candidates as medium/low confidence rather than an empty list — but never include candidates that clearly violate an explicit requirement.
 
-Respond with ONLY a JSON object, no other text:
+CRITICAL OUTPUT RULE: Respond with ONLY the JSON object — no preamble, no analysis, no per-candidate commentary, no markdown fences. Your message must begin with "{" and contain nothing but the JSON:
 {"matches":[{"product_id":"<id>","confidence":"high|medium|low","reason":"one sentence"}]}`;
 
 function parseJsonObject(raw) {
@@ -73,7 +73,7 @@ Return the JSON verdict now.`;
   try {
     resp = await c.messages.create({
       model: MODEL,
-      max_tokens: 2000,
+      max_tokens: 8000,
       system: SYSTEM,
       messages: [{ role: "user", content: user }],
     });
@@ -106,24 +106,101 @@ export function confidenceToScore(confidence) {
   return confidence === "high" ? 90 : confidence === "medium" ? 60 : 35;
 }
 
-// A cheaper/faster model is appropriate for a single focused yes/no.
-const VERIFY_MODEL = "claude-haiku-4-5";
+// The verification pass enforces nuanced rules (setting gates hard, but
+// metal/lab-grown are soft) — Sonnet follows that nuance far more reliably than
+// Haiku, and the calls run in parallel so latency stays ~one call.
+const VERIFY_MODEL = "claude-sonnet-4-6";
 
 const VERIFY_SYSTEM = `You are an expert jeweler doing a final check on ONE proposed match. You are given a customer's request and ONE product (title + description). Decide whether it should be shown to the customer.
 
-KEEP it (match=true) when the product is fundamentally the right thing:
+STEP 1 — DEFINING-SETTING GATE (check this FIRST, before anything else):
+A "defining setting" is the item's specific form/construction/setting, e.g.: cluster, solitaire, halo, three-stone, eternity, tennis, signet, pavé, channel-set, bezel-set, stud, hoop, huggie, riviera. These are MUTUALLY EXCLUSIVE and must NOT be treated as interchangeable: a halo is NOT a cluster; a three-stone is NOT a cluster; a solitaire is NOT a cluster; a bypass/five-stone/row ring is NOT a cluster. Match the EXACT setting named.
+- If the request NAMES a defining setting, the product MUST genuinely have that exact setting. If it does NOT (or it is a different/adjacent setting like halo vs cluster), respond match=false and STOP. Reject it no matter how well everything else matches — a strong match on metal, stone type, lab-grown vs natural, brand, or price does NOT compensate for the wrong/missing setting.
+- If the request does NOT name any defining setting, SKIP this gate entirely — do not require or invent one.
+
+STEP 2 — only for products that passed Step 1, apply the rest:
 - BRAND: if the request names a brand, the product must be that brand (Grand Seiko is NOT Seiko; Tiffany & Co. is specific).
 - ITEM TYPE: must match (a watch for a watch request, a ring for a ring request, a bracelet for a bracelet request).
-- KEY ATTRIBUTE: it must match the customer's main explicitly-stated attribute — e.g. dial color, primary gemstone, or motif/setting (a blue-dial request needs a blue dial; a cluster request needs a cluster, not a solitaire).
+- METAL COLOR/TYPE: if the request names a metal, the product must be the SAME metal color/type. Yellow gold, white gold, rose gold, sterling silver, and platinum are DISTINCT and NOT interchangeable — reject a wrong one. BUT karat/purity is NOT a requirement: a 14K request is satisfied by 10K/18K of the SAME color — never reject on karat alone.
+- KEY ATTRIBUTE: must match the customer's main explicitly-stated attribute — e.g. dial color or primary gemstone type.
 
-Do NOT reject just because of:
-- a DIFFERENT METAL or material (e.g. white vs yellow gold, steel vs gold) — keep it;
-- a missing SUB-TYPE qualifier (e.g. "dive" watch, "dress" watch) — keep it as long as it's the right brand/item type with the right key attribute.
+PREFERENCES ONLY — never reject for these, even when the customer named them:
+- KARAT / purity (10K vs 14K vs 18K of the same color);
+- LAB-GROWN vs NATURAL stone origin — a NATURAL-diamond product fully satisfies a "lab grown" request, and vice versa; origin only changes ranking. (Example: request "14K lab grown diamond cluster ring", product is a NATURAL diamond cluster → KEEP, because the cluster setting matches and lab-grown is only a preference.)
+- a missing SUB-TYPE qualifier (e.g. "dive" watch, "dress" watch).
 
-REJECT (match=false) only when it is clearly the wrong item: wrong brand, wrong item type, the key requested attribute is clearly wrong (e.g. blue dial requested but the dial is black/white/silver; cluster requested but it's a solitaire), or the product is unrelated to the request.
+REJECT (match=false) when: wrong/missing defining setting (Step 1), wrong brand, wrong item type, wrong metal color/type, or wrong key attribute. Do NOT reject for karat or lab-grown-vs-natural alone.
 
 Respond with ONLY a JSON object, no other text:
 {"match": true|false, "reason": "one short sentence"}`;
+
+// Defining settings recognized in a request, for the dedicated strict gate.
+// >>> EDIT THIS LIST to add/remove defining settings the gate enforces. <<<
+const SETTING_PATTERNS = [
+  ["cluster", /\bclusters?\b/i],
+  ["solitaire", /\bsolitaires?\b/i],
+  ["halo", /\bhalo\b/i],
+  ["three-stone", /\b(?:three[\s-]?stone|3[\s-]?stone)\b/i],
+  ["eternity", /\beternity\b/i],
+  ["tennis", /\btennis\b/i],
+  ["signet", /\bsignets?\b/i],
+  ["pave", /\bpav[eé]\b/i],
+  ["channel-set", /\bchannel[\s-]?set\b/i],
+  ["bezel", /\bbezel\b/i],
+  ["stud", /\bstuds?\b/i],
+  ["hoop", /\bhoops?\b/i],
+  ["huggie", /\bhuggies?\b/i],
+  ["riviera", /\briviera\b/i],
+];
+
+// Which defining settings does the request explicitly name?
+export function namedSettings(text) {
+  const t = String(text || "");
+  return SETTING_PATTERNS.filter(([, re]) => re.test(t)).map(([s]) => s);
+}
+
+const SETTING_SYSTEM = `You check ONE thing only: does a jewelry product have a specific SETTING/construction?
+
+Defining settings are MUTUALLY EXCLUSIVE and NOT interchangeable: cluster, solitaire, halo (including "hidden halo"), three-stone, eternity, tennis, signet, pavé, channel-set, bezel, stud, hoop, huggie, riviera, bypass, five-stone/row.
+Key distinctions to enforce strictly:
+- A halo (including HIDDEN HALO) is NOT a cluster.
+- A three-stone is NOT a cluster. A bypass/crossover, a five-stone, or a row/line ring is NOT a cluster.
+- A solitaire is NOT a cluster, halo, or three-stone.
+
+Respond with ONLY a JSON object: {"match": true|false, "reason": "one short sentence"}`;
+
+/**
+ * Strict setting-only gate. Returns { match } — true only if the product
+ * genuinely has ALL the required settings. Used as a second pass to tighten
+ * cluster-adjacent leaks (e.g. hidden halo passing for cluster). On error
+ * returns { match: true } so a transient failure doesn't drop a good match.
+ */
+export async function verifySetting({ product, settings }) {
+  const c = getClient();
+  if (!c || !settings || settings.length === 0) return { match: true };
+  const user = `Required setting(s): ${settings.join(", ")}.
+
+Product:
+- Title: ${JSON.stringify(product.title || "")}
+- Description: ${JSON.stringify((product.description || "").slice(0, 1200))}
+
+Does this product genuinely have ${settings.length > 1 ? "ALL of" : ""} the required setting(s) "${settings.join(", ")}"? Return the JSON now.`;
+  try {
+    const resp = await c.messages.create({
+      model: VERIFY_MODEL,
+      max_tokens: 200,
+      system: SETTING_SYSTEM,
+      messages: [{ role: "user", content: user }],
+    });
+    const raw = resp.content?.[0]?.type === "text" ? resp.content[0].text : "";
+    const parsed = parseJsonObject(raw);
+    if (!parsed || typeof parsed.match !== "boolean") return { match: true };
+    return { match: parsed.match, reason: parsed.reason };
+  } catch (err) {
+    console.error("verifySetting error:", err?.message || err);
+    return { match: true };
+  }
+}
 
 /**
  * Per-match verification (the double-check). Evaluates ONE product against the
