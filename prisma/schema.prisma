@@ -110,6 +110,22 @@ model Salesperson {
   @@index([shop])
 }
 
+// Records that a (request, product-version) pair was already reasoned about, so
+// the keep-watching webhook never re-runs the AI on an unchanged product —
+// including pairs the AI rejected (which create no Match row to dedupe on).
+model MatchEval {
+  id          String   @id @default(cuid())
+  shop        String
+  requestId   String
+  productId   String
+  productHash String
+  matched     Boolean
+  createdAt   DateTime @default(now())
+
+  @@unique([requestId, productId])
+  @@index([shop, productId])
+}
+
 model ProductEmbedding {
   id          String   @id @default(cuid())
   shop        String

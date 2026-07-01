@@ -7,7 +7,7 @@ import {
   textHash,
   hasEmbeddingKey,
 } from "./embeddings.server.js";
-import { reasonMatches, verifyMatch, verifySetting, namedSettings, confidenceToScore } from "./reasoningMatch.server.js";
+import { reasonMatches, verifyBatch, confidenceToScore } from "./reasoningMatch.server.js";
 import { sendMatchSummaryEmail, sendNewProductMatchEmail } from "./email.server.js";
 
 // --- Tunables -------------------------------------------------------------
@@ -107,30 +107,22 @@ export async function runMatchesForRequest(_admin, request) {
     description: p.description,
     price: p.price,
   }));
+  // Reasoning pass proposes matches (1 Sonnet call).
   let matches = await reasonMatches({
     description: request.description || "",
     budget: request.budget,
     candidates,
   });
 
-  // Step 3b — double-check: verify each proposed match individually (stricter
-  // than judging the whole batch). Drop those that fail; keep on transient error.
+  // Batched double-check: ONE Sonnet call re-verifies ALL proposed matches with
+  // strict attribute+setting gating (replaces the per-match fan-out of 2×M calls).
   if (matches.length > 0) {
-    const byIdC = new Map(candidates.map((c) => [c.productId, c]));
-    const settings = namedSettings(request.description || "");
-    const checked = await Promise.all(
-      matches.map(async (m) => {
-        const c = byIdC.get(m.productId);
-        if (!c) return null;
-        const [v, s] = await Promise.all([
-          verifyMatch({ description: request.description || "", product: c }),
-          settings.length ? verifySetting({ product: c, settings }) : { match: true },
-        ]);
-        if ((v && v.match === false) || (s && s.match === false)) return null;
-        return m;
-      }),
-    );
-    matches = checked.filter(Boolean);
+    const cById = new Map(candidates.map((c) => [c.productId, c]));
+    const pass = await verifyBatch({
+      description: request.description || "",
+      candidates: matches.map((m) => cById.get(m.productId)).filter(Boolean),
+    });
+    matches = matches.filter((m) => pass.has(m.productId));
   }
 
   // Never empty: if nothing survived, surface the closest candidates.
@@ -235,12 +227,21 @@ export async function matchProductAgainstRequests(shop, product) {
     where: { shop, productId: product.id },
     select: { requestId: true },
   });
-  const known = new Set(existing.map((m) => m.requestId)); // dedupe
+  const known = new Set(existing.map((m) => m.requestId)); // dedupe accepted
+  // Dedupe reasoned pairs (incl. rejected) so we never re-run the AI on an
+  // unchanged product for the same request.
+  const evals = await prisma.matchEval.findMany({
+    where: { shop, productId: product.id },
+    select: { requestId: true, productHash: true },
+  });
+  const evalHash = new Map(evals.map((e) => [e.requestId, e.productHash]));
 
   const ops = [];
+  const evalOps = [];
   const newHigh = [];
   for (const request of requests) {
-    if (known.has(request.id)) continue; // already evaluated this product for this request
+    if (known.has(request.id)) continue; // already matched this product for this request
+    if (evalHash.get(request.id) === hash) continue; // already reasoned this exact product version
     if (!withinBudget(request.budget, product.price)) continue;
     const reqVec = await getRequestEmbedding(request);
     if (!reqVec) continue;
@@ -251,21 +252,25 @@ export async function matchProductAgainstRequests(shop, product) {
       budget: request.budget,
       candidates: [{ productId: product.id, title: product.title, description: product.description, price: product.price }],
     });
-    const m = matches.find((x) => x.productId === product.id);
-    if (!m) continue;
-
-    // Double-check this specific pairing before alerting (+ strict setting gate).
-    const settings = namedSettings(request.description || "");
-    const [v, s] = await Promise.all([
-      verifyMatch({
+    let m = matches.find((x) => x.productId === product.id);
+    // Batched strict double-check on this single candidate.
+    if (m) {
+      const pass = await verifyBatch({
         description: request.description || "",
-        product: { title: product.title, description: product.description, price: product.price },
-      }),
-      settings.length
-        ? verifySetting({ product: { title: product.title, description: product.description }, settings })
-        : { match: true },
-    ]);
-    if ((v && v.match === false) || (s && s.match === false)) continue;
+        candidates: [{ productId: product.id, title: product.title, description: product.description }],
+      });
+      if (!pass.has(product.id)) m = null;
+    }
+    // Record that this (request, product-version) pair was reasoned — even a
+    // reject — so future webhooks skip it until the product changes.
+    evalOps.push(
+      prisma.matchEval.upsert({
+        where: { requestId_productId: { requestId: request.id, productId: product.id } },
+        update: { productHash: hash, matched: !!m },
+        create: { shop, requestId: request.id, productId: product.id, productHash: hash, matched: !!m },
+      }).catch(() => {}),
+    );
+    if (!m) continue;
 
     const needsReview = m.confidence !== "high";
     ops.push(

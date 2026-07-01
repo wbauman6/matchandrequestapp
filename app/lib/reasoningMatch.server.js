@@ -3,28 +3,39 @@ import Anthropic from "@anthropic-ai/sdk";
 let client = null;
 function getClient() {
   if (!process.env.ANTHROPIC_API_KEY) return null;
-  if (!client) client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+  // maxRetries low: matching no longer fires concurrent bursts, so rate-limit
+  // retries would just be wasted spend.
+  if (!client) client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, maxRetries: 1 });
   return client;
 }
 
 const MODEL = "claude-sonnet-4-6";
 
-const SYSTEM = `You are an expert jeweler matching a customer's special-order request against in-stock inventory. Given the request and candidate products (title + description), decide which genuinely satisfy it.
+export const SYSTEM = `You are an expert jeweler matching a customer's special-order request against candidate inventory. You are given the request and a list of candidate products (title + description). Return ONLY the candidates that genuinely satisfy the request, applying STRICT attribute-by-attribute gating. This single pass is the final decision — be as rigorous per item as if you were checking each one individually.
 
-Apply real jewelry knowledge:
-- Brands are distinct: "Grand Seiko" is NOT "Seiko"; "Tiffany & Co." is a specific brand, not any heart-shaped jewelry.
-- Metal colors are not interchangeable: yellow vs white vs rose gold; two-tone is its own thing.
-- Settings/constructions differ: cluster vs solitaire vs halo vs three-stone vs pavé vs tennis.
-- Item types differ: ring vs bracelet vs necklace vs pendant vs earrings vs watch.
+ATTRIBUTE-BY-ATTRIBUTE GATING:
+- Every attribute the customer SPECIFIES is an INDEPENDENT HARD requirement. A candidate must satisfy it or be EXCLUDED.
+- Every attribute the customer does NOT specify is UNCONSTRAINED — ignore it; never exclude on it (all variants are acceptable).
+- ALL specified attributes must pass together (AND). A strong match on one specified attribute NEVER compensates for failing another. An unspecified attribute NEVER excludes.
 
-Rules:
-- EXCLUDE any candidate that violates a clear, explicit requirement in the request (wrong metal, wrong brand, wrong item type, wrong stone, or clearly over an explicit budget).
-- Do not over-apply vague or aesthetic terms (e.g. "elegant", "classic", "dainty") — those shade preference, not hard requirements.
-- Rank results most-relevant first (high before medium before low).
-- If nothing is a strong match, STILL return the closest candidates as medium/low confidence rather than an empty list — but never include candidates that clearly violate an explicit requirement.
+Attributes (check only those the customer actually specified):
+• SETTING/form — cluster, solitaire, halo, three-stone, eternity, tennis, signet, pavé, channel-set, bezel, stud, hoop, huggie, riviera. MUTUALLY EXCLUSIVE and NOT interchangeable: a halo (incl. "hidden halo") is NOT a cluster; a three-stone is NOT a cluster; a bypass/five-stone/row ring is NOT a cluster; a solitaire is NOT a cluster.
+• METAL COLOR — yellow / white / rose / two-tone (DISTINCT; yellow gold ≠ white gold ≠ rose gold ≠ two-tone).
+• METAL TYPE — gold vs platinum vs sterling silver vs steel (DISTINCT).
+• DIAMOND/STONE ORIGIN — natural vs lab-grown (a.k.a. lab-created / lab grown / man-made / synthetic).
+• ITEM TYPE — ring / bracelet / necklace / pendant / earrings / watch / brooch, etc.
+• BRAND — e.g. Tiffany & Co., Cartier, Rolex, Grand Seiko (Grand Seiko is NOT Seiko).
+• PRIMARY GEMSTONE TYPE — diamond / sapphire / ruby / emerald / pearl, etc.
+• (Watches) DIAL COLOR.
 
-CRITICAL OUTPUT RULE: Respond with ONLY the JSON object — no preamble, no analysis, no per-candidate commentary, no markdown fences. Your message must begin with "{" and contain nothing but the JSON:
-{"matches":[{"product_id":"<id>","confidence":"high|medium|low","reason":"one sentence"}]}`;
+KARAT IS NOT A GATE: karat/purity (10K vs 14K vs 18K) is never a hard requirement — a "14K yellow gold" request is satisfied by an 18K yellow gold item (same color/type). Only metal COLOR and metal TYPE gate; never karat.
+
+Do NOT over-apply vague/aesthetic terms ("elegant", "classic", "dainty") — those shade ranking, they are not gates.
+
+For EACH candidate: exclude it if it fails ANY specified attribute; otherwise include it. Rank included matches high → medium → low by overall fit. If nothing passes, STILL return the closest 1-3 as low confidence (never an empty list), but NEVER include a candidate that fails a specified attribute gate.
+
+CRITICAL OUTPUT RULE: Respond with ONLY the JSON object — no preamble, no analysis, no per-candidate commentary, no markdown fences. Begin with "{" and output nothing but:
+{"matches":[{"product_id":"<id>","confidence":"high|medium|low","reason":"one sentence naming the specified attributes it satisfies"}]}`;
 
 function parseJsonObject(raw) {
   if (!raw) return null;
@@ -101,6 +112,59 @@ Return the JSON verdict now.`;
     .sort((a, b) => rank[a.confidence] - rank[b.confidence]);
 }
 
+export const BATCH_VERIFY_SYSTEM = `You are an expert jeweler doing a STRICT final check on a set of proposed matches. You are given a customer's request and a LIST of products (title + description). Judge EACH product independently and decide whether it genuinely satisfies the request.
+
+Apply attribute-by-attribute gating to EACH product:
+- Every attribute the customer SPECIFIES is an INDEPENDENT HARD requirement — the product must satisfy it or be match=false. Every attribute NOT specified is unconstrained (ignore it). ALL specified attributes must pass together (AND); a strong match on one never compensates for failing another.
+- Specifiable attributes: SETTING/form (cluster, solitaire, halo, three-stone, eternity, tennis, signet, pavé, channel-set, bezel, stud, hoop, huggie, riviera — MUTUALLY EXCLUSIVE: a halo incl. "hidden halo" is NOT a cluster; three-stone is NOT a cluster; bypass/five-stone/row is NOT a cluster; solitaire is NOT a cluster); METAL COLOR (yellow/white/rose/two-tone — distinct); METAL TYPE (gold/platinum/sterling silver/steel — distinct); DIAMOND/STONE ORIGIN (natural vs lab-grown); ITEM TYPE (ring/bracelet/necklace/pendant/earrings/watch...); BRAND (Grand Seiko ≠ Seiko); PRIMARY GEMSTONE TYPE; (watches) DIAL COLOR.
+- KARAT IS NOT A GATE: 10K/14K/18K never gates — a "14K yellow gold" request is satisfied by 18K yellow gold. Only metal COLOR and metal TYPE gate.
+
+Respond with ONLY a JSON object (begin with "{", no other text) giving a verdict for EVERY product id provided:
+{"results":[{"product_id":"<id>","match":true|false,"reason":"one short sentence"}]}`;
+
+/**
+ * Batched double-check: verifies ALL proposed matches in ONE Sonnet call (same
+ * strict attribute+setting gating as the per-item pass). Returns a Set of
+ * productIds that PASS. On failure returns all ids (don't drop on transient error).
+ */
+export async function verifyBatch({ description, candidates }) {
+  const c = getClient();
+  const allIds = new Set((candidates || []).map((p) => p.productId));
+  if (!c || !candidates?.length) return allIds;
+  const list = candidates.map((p) => ({
+    product_id: p.productId,
+    title: p.title || "",
+    description: (p.description || "").slice(0, 900),
+  }));
+  const user = `Customer request: "${description}"
+
+Products to check (${list.length}):
+${JSON.stringify(list)}
+
+Return a verdict for every product id. Return the JSON now.`;
+  try {
+    const resp = await c.messages.create({
+      model: VERIFY_MODEL,
+      max_tokens: 4000,
+      system: BATCH_VERIFY_SYSTEM,
+      messages: [{ role: "user", content: user }],
+    });
+    const raw = resp.content?.[0]?.type === "text" ? resp.content[0].text : "";
+    const parsed = parseJsonObject(raw);
+    if (!parsed || !Array.isArray(parsed.results)) return allIds;
+    const pass = new Set();
+    for (const rrr of parsed.results) {
+      if (allIds.has(rrr.product_id) && rrr.match !== false) pass.add(rrr.product_id);
+    }
+    // Any id the model omitted → keep (avoid dropping on incomplete output).
+    for (const id of allIds) if (!parsed.results.some((x) => x.product_id === id)) pass.add(id);
+    return pass;
+  } catch (err) {
+    console.error("verifyBatch error:", err?.message || err);
+    return allIds;
+  }
+}
+
 // Map confidence to a 0-100 score for storage/sorting/display.
 export function confidenceToScore(confidence) {
   return confidence === "high" ? 90 : confidence === "medium" ? 60 : 35;
@@ -111,28 +175,35 @@ export function confidenceToScore(confidence) {
 // Haiku, and the calls run in parallel so latency stays ~one call.
 const VERIFY_MODEL = "claude-sonnet-4-6";
 
-const VERIFY_SYSTEM = `You are an expert jeweler doing a final check on ONE proposed match. You are given a customer's request and ONE product (title + description). Decide whether it should be shown to the customer.
+export const VERIFY_SYSTEM = `You are an expert jeweler doing a final check on ONE proposed match. You are given a customer's request and ONE product (title + description).
 
-STEP 1 — DEFINING-SETTING GATE (check this FIRST, before anything else):
-A "defining setting" is the item's specific form/construction/setting, e.g.: cluster, solitaire, halo, three-stone, eternity, tennis, signet, pavé, channel-set, bezel-set, stud, hoop, huggie, riviera. These are MUTUALLY EXCLUSIVE and must NOT be treated as interchangeable: a halo is NOT a cluster; a three-stone is NOT a cluster; a solitaire is NOT a cluster; a bypass/five-stone/row ring is NOT a cluster. Match the EXACT setting named.
-- If the request NAMES a defining setting, the product MUST genuinely have that exact setting. If it does NOT (or it is a different/adjacent setting like halo vs cluster), respond match=false and STOP. Reject it no matter how well everything else matches — a strong match on metal, stone type, lab-grown vs natural, brand, or price does NOT compensate for the wrong/missing setting.
-- If the request does NOT name any defining setting, SKIP this gate entirely — do not require or invent one.
+CORE PRINCIPLE — attribute-by-attribute gating:
+- Every attribute the customer SPECIFIES is an INDEPENDENT HARD requirement (a gate). The product must satisfy it or be rejected.
+- Every attribute the customer does NOT specify is UNCONSTRAINED — ignore it completely; never use it to reject (show all variants).
+- ALL specified gates must pass together (AND logic). A strong match on one specified attribute NEVER compensates for failing another. An unspecified attribute NEVER excludes.
 
-STEP 2 — only for products that passed Step 1, apply the rest:
-- BRAND: if the request names a brand, the product must be that brand (Grand Seiko is NOT Seiko; Tiffany & Co. is specific).
-- ITEM TYPE: must match (a watch for a watch request, a ring for a ring request, a bracelet for a bracelet request).
-- METAL COLOR/TYPE: if the request names a metal, the product must be the SAME metal color/type. Yellow gold, white gold, rose gold, sterling silver, and platinum are DISTINCT and NOT interchangeable — reject a wrong one. BUT karat/purity is NOT a requirement: a 14K request is satisfied by 10K/18K of the SAME color — never reject on karat alone.
-- KEY ATTRIBUTE: must match the customer's main explicitly-stated attribute — e.g. dial color or primary gemstone type.
+PROCEDURE:
+1) First, identify which of these attributes the customer EXPLICITLY specified in the request:
+   • SETTING/form — cluster, solitaire, halo, three-stone, eternity, tennis, signet, pavé, channel-set, bezel, stud, hoop, huggie, riviera. These are MUTUALLY EXCLUSIVE and NOT interchangeable: a halo (incl. "hidden halo") is NOT a cluster; a three-stone is NOT a cluster; a bypass/five-stone/row ring is NOT a cluster; a solitaire is NOT a cluster.
+   • METAL COLOR — yellow, white, rose, or two-tone. These are DISTINCT (yellow gold ≠ white gold ≠ rose gold ≠ two-tone).
+   • METAL TYPE — gold vs platinum vs sterling silver vs steel, etc. (These are DISTINCT.)
+   • DIAMOND/STONE ORIGIN — natural vs lab-grown (also called lab-created / lab grown / man-made / synthetic).
+   • ITEM TYPE — ring, bracelet, necklace, pendant, earrings, watch, brooch, etc.
+   • BRAND — e.g. Tiffany & Co., Cartier, Rolex, Grand Seiko (Grand Seiko is NOT Seiko).
+   • PRIMARY GEMSTONE TYPE — diamond, sapphire, ruby, emerald, pearl, etc.
+   • (Watches) DIAL COLOR.
+2) For EACH specified attribute, check the product independently against it.
+3) If the product fails ANY single specified attribute, respond match=false (name the failing attribute in the reason).
+4) IGNORE every attribute the customer did NOT specify — do not require or infer it; all variants of an unspecified attribute are acceptable.
 
-PREFERENCES ONLY — never reject for these, even when the customer named them:
-- KARAT / purity (10K vs 14K vs 18K of the same color);
-- LAB-GROWN vs NATURAL stone origin — a NATURAL-diamond product fully satisfies a "lab grown" request, and vice versa; origin only changes ranking. (Example: request "14K lab grown diamond cluster ring", product is a NATURAL diamond cluster → KEEP, because the cluster setting matches and lab-grown is only a preference.)
-- a missing SUB-TYPE qualifier (e.g. "dive" watch, "dress" watch).
+KARAT IS NOT A GATE: karat/purity (10K vs 14K vs 18K) is never a hard requirement — a "14K yellow gold" request is satisfied by an 18K yellow gold item (same color/type). Only reject on metal COLOR or metal TYPE, never on karat.
 
-REJECT (match=false) when: wrong/missing defining setting (Step 1), wrong brand, wrong item type, wrong metal color/type, or wrong key attribute. Do NOT reject for karat or lab-grown-vs-natural alone.
+Examples:
+- "gold cluster lab grown ring" → specified: setting=cluster, origin=lab-grown, type=ring (and gold as metal type). NOT specified: metal color, karat. So: require cluster AND lab-grown AND ring; accept ANY gold color; reject natural; reject non-clusters.
+- "white gold diamond ring" → specified: metal color=white, metal type=gold, stone=diamond, type=ring. NOT specified: setting, origin. So: require white gold diamond ring; accept any setting and natural OR lab-grown.
+- "diamond ring" → specified: stone=diamond, type=ring only. Accept any setting, any color, any origin, any karat.
 
-Respond with ONLY a JSON object, no other text:
-{"match": true|false, "reason": "one short sentence"}`;
+Respond with ONLY a JSON object: {"match": true|false, "reason": "one short sentence: name the specified attribute that failed, or confirm all specified attributes passed"}`;
 
 // Defining settings recognized in a request, for the dedicated strict gate.
 // >>> EDIT THIS LIST to add/remove defining settings the gate enforces. <<<
@@ -159,7 +230,7 @@ export function namedSettings(text) {
   return SETTING_PATTERNS.filter(([, re]) => re.test(t)).map(([s]) => s);
 }
 
-const SETTING_SYSTEM = `You check ONE thing only: does a jewelry product have a specific SETTING/construction?
+export const SETTING_SYSTEM = `You check ONE thing only: does a jewelry product have a specific SETTING/construction?
 
 Defining settings are MUTUALLY EXCLUSIVE and NOT interchangeable: cluster, solitaire, halo (including "hidden halo"), three-stone, eternity, tennis, signet, pavé, channel-set, bezel, stud, hoop, huggie, riviera, bypass, five-stone/row.
 Key distinctions to enforce strictly:
