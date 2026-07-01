@@ -32,9 +32,11 @@ KARAT IS NOT A GATE: karat/purity (10K vs 14K vs 18K) is never a hard requiremen
 
 Do NOT over-apply vague/aesthetic terms ("elegant", "classic", "dainty") — those shade ranking, they are not gates.
 
-For EACH candidate: exclude it if it fails ANY specified attribute; otherwise include it. Rank included matches high → medium → low by overall fit. If nothing passes, STILL return the closest 1-3 as low confidence (never an empty list), but NEVER include a candidate that fails a specified attribute gate.
+For EACH candidate: exclude it if it fails ANY specified attribute; otherwise include it. Rank included matches high → medium → low by overall fit.
 
-CRITICAL OUTPUT RULE: Respond with ONLY the JSON object — no preamble, no analysis, no per-candidate commentary, no markdown fences. Begin with "{" and output nothing but:
+ZERO MATCHES IS A VALID, CORRECT ANSWER. If NO candidate passes every specified attribute, return an EMPTY matches array. NEVER substitute across a specified attribute (e.g. never return a natural-diamond ring for a lab-grown request, or a white-gold ring for a yellow-gold request) just to avoid an empty result. Never include a candidate that fails a specified attribute gate.
+
+CRITICAL OUTPUT RULE: Respond with ONLY the JSON object — no preamble, no analysis, no per-candidate commentary, no markdown fences. Begin with "{" and output nothing but the JSON (an empty result is exactly {"matches":[]}):
 {"matches":[{"product_id":"<id>","confidence":"high|medium|low","reason":"one sentence naming the specified attributes it satisfies"}]}`;
 
 function parseJsonObject(raw) {

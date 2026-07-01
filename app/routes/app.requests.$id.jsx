@@ -616,17 +616,23 @@ export default function RequestDetailPage() {
         </div>
 
         {req.matches.length === 0 ? (
-          <p
+          <div
             style={{
-              color: "#6d7175",
               textAlign: "center",
-              padding: "40px 0",
+              padding: "40px 20px",
               margin: 0,
             }}
           >
-            No products matched yet. Try editing the request keywords or check that
-            you have in-stock products with matching tags.
-          </p>
+            <div style={{ fontSize: 28, marginBottom: 8 }}>👀</div>
+            <p style={{ color: "#202223", fontWeight: 600, margin: "0 0 4px" }}>
+              Not in stock yet — watching this request
+            </p>
+            <p style={{ color: "#6d7175", margin: 0, fontSize: 13 }}>
+              Nothing currently in inventory matches all of this request&apos;s
+              requirements. This request stays active, and you&apos;ll be alerted
+              automatically if matching inventory arrives.
+            </p>
+          </div>
         ) : (
           <div
             style={{

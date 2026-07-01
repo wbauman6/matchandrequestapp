@@ -14,7 +14,6 @@ import { sendMatchSummaryEmail, sendNewProductMatchEmail } from "./email.server.
 const TOP_K = 50; // candidates sent to the AI reasoning pass
 const BUDGET_TOLERANCE = 1.5; // exclude items more than this multiple over budget
 const RETRIEVAL_GATE = 0.35; // webhook: min cosine for a new product to be judged for a request
-const NEVER_EMPTY_FALLBACK = 5; // if the AI returns nothing, surface this many closest as "low"
 
 function withinBudget(budget, price) {
   if (!budget || price == null) return true;
@@ -125,14 +124,10 @@ export async function runMatchesForRequest(_admin, request) {
     matches = matches.filter((m) => pass.has(m.productId));
   }
 
-  // Never empty: if nothing survived, surface the closest candidates.
-  if (matches.length === 0 && pool.length > 0) {
-    matches = pool.slice(0, NEVER_EMPTY_FALLBACK).map((p) => ({
-      productId: p.productId,
-      confidence: "low",
-      reason: "Closest available item by description similarity.",
-    }));
-  }
+  // NOTE: zero matches is a valid outcome. We intentionally do NOT surface the
+  // closest wrong-attribute items — an absolute gate (metal color, origin,
+  // setting, item type, brand) must never be relaxed to avoid an empty result.
+  // The request stays active and the keep-watching job matches later inventory.
 
   const byId = new Map(rows.map((r) => [r.productId, r]));
   const ops = [];
