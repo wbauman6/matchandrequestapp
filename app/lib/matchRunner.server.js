@@ -8,17 +8,15 @@ import {
   hasEmbeddingKey,
 } from "./embeddings.server.js";
 import { reasonMatches, verifyBatch, confidenceToScore } from "./reasoningMatch.server.js";
+import { withinBudget, isOverBudget } from "./budget.js";
 import { sendMatchSummaryEmail, sendNewProductMatchEmail } from "./email.server.js";
 
 // --- Tunables -------------------------------------------------------------
 const TOP_K = 50; // candidates sent to the AI reasoning pass
-const BUDGET_TOLERANCE = 1.5; // exclude items more than this multiple over budget
 const RETRIEVAL_GATE = 0.35; // webhook: min cosine for a new product to be judged for a request
 
-function withinBudget(budget, price) {
-  if (!budget || price == null) return true;
-  return price <= budget * BUDGET_TOLERANCE;
-}
+// Tiered budget tolerance (editable config lives in ./budget.js).
+
 
 // Embed (and lazily persist) a request's query vector from its description.
 async function getRequestEmbedding(request) {
@@ -45,6 +43,7 @@ function upsertMatch(shop, request, p, fields) {
       confidence: fields.confidence,
       reasoning: fields.reason,
       needsReview: fields.needsReview,
+      overBudget: fields.overBudget ?? false,
       productTitle: p.title,
       productPrice: p.price,
       productImage: p.image,
@@ -60,6 +59,7 @@ function upsertMatch(shop, request, p, fields) {
       confidence: fields.confidence,
       reasoning: fields.reason,
       needsReview: fields.needsReview,
+      overBudget: fields.overBudget ?? false,
       matchedKeywords: [],
       declined: false,
     },
@@ -106,10 +106,11 @@ export async function runMatchesForRequest(_admin, request) {
     description: p.description,
     price: p.price,
   }));
-  // Reasoning pass proposes matches (1 Sonnet call).
+  // Reasoning pass proposes matches (1 Sonnet call). Budget is NOT passed — it's
+  // a soft ranking factor handled here, never an AI gate.
   let matches = await reasonMatches({
     description: request.description || "",
-    budget: request.budget,
+    budget: null,
     candidates,
   });
 
@@ -135,6 +136,7 @@ export async function runMatchesForRequest(_admin, request) {
   for (const m of matches) {
     const p = byId.get(m.productId);
     if (!p) continue;
+    const overBudget = isOverBudget(request.budget, p.price);
     const needsReview = m.confidence !== "high";
     ops.push(
       upsertMatch(request.shop, request, p, {
@@ -142,9 +144,12 @@ export async function runMatchesForRequest(_admin, request) {
         confidence: m.confidence,
         reason: m.reason,
         needsReview,
+        overBudget,
       }),
     );
-    if (!needsReview) {
+    // Over-budget items appear in-app (ranked below, labeled) but do not trigger
+    // an auto-notify email.
+    if (!needsReview && !overBudget) {
       notify.push({
         productTitle: p.title,
         productPrice: p.price,
@@ -244,7 +249,7 @@ export async function matchProductAgainstRequests(shop, product) {
 
     const matches = await reasonMatches({
       description: request.description || "",
-      budget: request.budget,
+      budget: null, // budget is a soft ranking factor, never an AI gate
       candidates: [{ productId: product.id, title: product.title, description: product.description, price: product.price }],
     });
     let m = matches.find((x) => x.productId === product.id);
@@ -267,6 +272,7 @@ export async function matchProductAgainstRequests(shop, product) {
     );
     if (!m) continue;
 
+    const overBudget = isOverBudget(request.budget, product.price);
     const needsReview = m.confidence !== "high";
     ops.push(
       upsertMatch(shop, request, { productId: product.id, title: product.title, price: product.price, image: product.image }, {
@@ -274,9 +280,10 @@ export async function matchProductAgainstRequests(shop, product) {
         confidence: m.confidence,
         reason: m.reason,
         needsReview,
+        overBudget,
       }),
     );
-    if (!needsReview) newHigh.push({ request, m });
+    if (!needsReview && !overBudget) newHigh.push({ request, m });
   }
   await Promise.all(ops);
 

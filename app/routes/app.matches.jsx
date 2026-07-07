@@ -17,7 +17,7 @@ export const loader = async ({ request }) => {
         },
       },
     },
-    orderBy: [{ read: "asc" }, { createdAt: "desc" }],
+    orderBy: [{ read: "asc" }, { overBudget: "asc" }, { createdAt: "desc" }],
     take: 200,
   });
   const unreadCount = matches.filter((m) => !m.read).length;
@@ -124,6 +124,23 @@ function MatchCard({ m }) {
           >
             {m.score}% match
           </span>
+          {m.overBudget && (
+            <span
+              style={{
+                fontSize: 11,
+                fontWeight: 700,
+                padding: "2px 10px",
+                borderRadius: 12,
+                background: "#fff5e6",
+                color: "#a85100",
+              }}
+            >
+              Over budget
+              {m.request.budget != null && m.productPrice != null
+                ? ` · $${(m.productPrice - m.request.budget).toLocaleString()} over`
+                : ""}
+            </span>
+          )}
         </div>
 
         <div style={{ fontSize: 13, color: "#616161", marginBottom: 8 }}>

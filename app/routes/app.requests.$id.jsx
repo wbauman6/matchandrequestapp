@@ -12,7 +12,8 @@ export const loader = async ({ request, params }) => {
     include: {
       matches: {
         where: { declined: false },
-        orderBy: [{ score: "desc" }, { createdAt: "desc" }],
+        // In-budget matches first, then over-budget (ranked below), each by score.
+        orderBy: [{ overBudget: "asc" }, { score: "desc" }, { createdAt: "desc" }],
       },
       notes: {
         orderBy: { createdAt: "asc" },
@@ -131,9 +132,13 @@ function DetailField({ label, value }) {
   );
 }
 
-function MatchTile({ m }) {
+function MatchTile({ m, budget }) {
   const { bg, color } = scoreColor(m.score);
   const productHref = adminProductUrl(m.productId);
+  const overAmount =
+    m.overBudget && budget != null && m.productPrice != null
+      ? m.productPrice - budget
+      : 0;
   return (
     <div
       style={{
@@ -221,6 +226,22 @@ function MatchTile({ m }) {
           </div>
         )}
       </a>
+
+      {m.overBudget && (
+        <div
+          style={{
+            fontSize: 11,
+            fontWeight: 600,
+            color: "#a85100",
+            background: "#fff5e6",
+            border: "1px solid #ffd79d",
+            borderRadius: 6,
+            padding: "4px 8px",
+          }}
+        >
+          Slightly over budget{overAmount > 0 ? ` · $${overAmount.toLocaleString()} over` : ""}
+        </div>
+      )}
 
       {m.matchedKeywords.length > 0 && (
         <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
@@ -642,7 +663,7 @@ export default function RequestDetailPage() {
             }}
           >
             {req.matches.map((m) => (
-              <MatchTile key={m.id} m={m} />
+              <MatchTile key={m.id} m={m} budget={req.budget} />
             ))}
           </div>
         )}

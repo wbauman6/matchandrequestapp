@@ -74,6 +74,7 @@ model Match {
   needsReview     Boolean  @default(false)
   reasoning       String?
   confidence      String?
+  overBudget      Boolean  @default(false)
   confirmedAt     DateTime?
   createdAt       DateTime @default(now())
   request         Request  @relation(fields: [requestId], references: [id], onDelete: Cascade)
