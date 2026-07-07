@@ -12,6 +12,10 @@ automatically_update_urls_on_dev = true
 api_version = "2026-07"
 
   [[webhooks.subscriptions]]
+  uri = "/webhooks/products"
+  topics = [ "products/update", "products/create" ]
+
+  [[webhooks.subscriptions]]
   uri = "/webhooks/app/scopes_update"
   topics = [ "app/scopes_update" ]
 
@@ -19,13 +23,9 @@ api_version = "2026-07"
   uri = "/webhooks/app/uninstalled"
   topics = [ "app/uninstalled" ]
 
-  [[webhooks.subscriptions]]
-  uri = "/webhooks/products"
-  topics = [ "products/create", "products/update" ]
-
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
-scopes = "read_products,read_inventory,write_products,write_metaobjects,write_metaobject_definitions,read_customers"
+scopes = "read_customers,read_inventory,read_products,write_metaobject_definitions,write_metaobjects,write_products"
 
 [auth]
 redirect_urls = [ "https://matchandrequestapp2.vercel.app/auth/callback" ]

@@ -104,11 +104,18 @@ model Salesperson {
   shop      String
   name      String
   email     String
+  // "admin" sees all requests/matches on POS; "salesperson" sees only their own.
+  role      String   @default("salesperson")
+  // Numeric Shopify POS staff-member ID (from the POS Session API), stored as a
+  // string. Used to map the pinned iPad staff member to this salesperson, since
+  // the POS Session API exposes staffMemberId but not email. Set once via Settings.
+  posStaffId String?
   active    Boolean  @default(true)
   createdAt DateTime @default(now())
 
   @@unique([shop, email])
   @@index([shop])
+  @@index([shop, posStaffId])
 }
 
 // Records that a (request, product-version) pair was already reasoned about, so

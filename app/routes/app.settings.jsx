@@ -21,12 +21,13 @@ export const action = async ({ request }) => {
   if (act === "add") {
     const name = String(data.get("name") || "").trim();
     const email = String(data.get("email") || "").trim().toLowerCase();
+    const role = String(data.get("role") || "salesperson") === "admin" ? "admin" : "salesperson";
     if (!name || !email) {
       return { error: "Name and email are required" };
     }
     try {
       await prisma.salesperson.create({
-        data: { shop: session.shop, name, email },
+        data: { shop: session.shop, name, email, role },
       });
     } catch (err) {
       if (err.code === "P2002") {
@@ -34,6 +35,25 @@ export const action = async ({ request }) => {
       }
       throw err;
     }
+  }
+
+  if (act === "set-role") {
+    const role = String(data.get("role") || "salesperson") === "admin" ? "admin" : "salesperson";
+    await prisma.salesperson.update({
+      where: { id: String(data.get("id")) },
+      data: { role },
+    });
+  }
+
+  if (act === "set-pos-id") {
+    // The numeric POS staff-member ID that links a salesperson to their POS
+    // account. Empty clears the link. Digits only.
+    const raw = String(data.get("posStaffId") || "").trim();
+    const posStaffId = raw ? raw.replace(/\D/g, "") || null : null;
+    await prisma.salesperson.update({
+      where: { id: String(data.get("id")) },
+      data: { posStaffId },
+    });
   }
 
   if (act === "toggle") {
@@ -87,6 +107,7 @@ export default function SettingsPage() {
   const submitting = nav.state === "submitting";
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
+  const [role, setRole] = useState("salesperson");
 
   return (
     <s-page heading="Settings">
@@ -96,13 +117,14 @@ export default function SettingsPage() {
           onSubmit={() => {
             setName("");
             setEmail("");
+            setRole("salesperson");
           }}
         >
           <input type="hidden" name="_action" value="add" />
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "1fr 1fr auto",
+              gridTemplateColumns: "1fr 1fr auto auto",
               gap: 12,
               alignItems: "end",
             }}
@@ -130,6 +152,18 @@ export default function SettingsPage() {
                 placeholder="jane@store.com"
               />
             </div>
+            <div>
+              <label style={labelStyle}>Role</label>
+              <select
+                name="role"
+                value={role}
+                onChange={(e) => setRole(e.target.value)}
+                style={inputStyle}
+              >
+                <option value="salesperson">Salesperson</option>
+                <option value="admin">Admin</option>
+              </select>
+            </div>
             <button
               type="submit"
               disabled={submitting}
@@ -153,6 +187,13 @@ export default function SettingsPage() {
       </s-section>
 
       <s-section heading={`Salespeople (${salespeople.length})`}>
+        <p style={{ fontSize: 13, color: "#6d7175", margin: "0 0 16px" }}>
+          <strong>POS Staff ID</strong> links a salesperson to their POS account so
+          the Requests tile on the iPad knows who they are. To find someone&apos;s ID,
+          have them open the <strong>Requests</strong> tile in POS — it shows their POS
+          Staff ID on screen. Paste that number here. Admins see all requests on POS;
+          salespeople see only their own.
+        </p>
         {salespeople.length === 0 ? (
           <p
             style={{
@@ -169,7 +210,7 @@ export default function SettingsPage() {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
             <thead>
               <tr style={{ background: "#f6f6f7", textAlign: "left" }}>
-                {["Name", "Email", "Status", "Actions"].map((h) => (
+                {["Name", "Email", "Role", "POS Staff ID", "Status", "Actions"].map((h) => (
                   <th
                     key={h}
                     style={{
@@ -191,6 +232,37 @@ export default function SettingsPage() {
                 <tr key={sp.id} style={{ borderBottom: "1px solid #e1e3e5" }}>
                   <td style={{ padding: "12px 16px", fontWeight: 600 }}>{sp.name}</td>
                   <td style={{ padding: "12px 16px", color: "#414547" }}>{sp.email}</td>
+                  <td style={{ padding: "12px 16px" }}>
+                    <Form method="post">
+                      <input type="hidden" name="_action" value="set-role" />
+                      <input type="hidden" name="id" value={sp.id} />
+                      <select
+                        name="role"
+                        defaultValue={sp.role}
+                        onChange={(e) => e.currentTarget.form.requestSubmit()}
+                        style={{ ...inputStyle, padding: "6px 8px", width: "auto" }}
+                      >
+                        <option value="salesperson">Salesperson</option>
+                        <option value="admin">Admin</option>
+                      </select>
+                    </Form>
+                  </td>
+                  <td style={{ padding: "12px 16px" }}>
+                    <Form method="post" style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                      <input type="hidden" name="_action" value="set-pos-id" />
+                      <input type="hidden" name="id" value={sp.id} />
+                      <input
+                        name="posStaffId"
+                        defaultValue={sp.posStaffId || ""}
+                        inputMode="numeric"
+                        placeholder="e.g. 1234567"
+                        style={{ ...inputStyle, padding: "6px 8px", width: 120 }}
+                      />
+                      <button type="submit" style={{ ...btnSecondary, color: "#005bd3" }}>
+                        Save
+                      </button>
+                    </Form>
+                  </td>
                   <td style={{ padding: "12px 16px" }}>
                     <span
                       style={{
