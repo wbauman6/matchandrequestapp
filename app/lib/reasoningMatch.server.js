@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { metalToneRules } from "./metalTone.js";
 
 let client = null;
 function getClient() {
@@ -20,15 +21,14 @@ ATTRIBUTE-BY-ATTRIBUTE GATING:
 
 Attributes (check only those the customer actually specified):
 • SETTING/form — cluster, solitaire, halo, three-stone, eternity, tennis, signet, pavé, channel-set, bezel, stud, hoop, huggie, riviera. MUTUALLY EXCLUSIVE and NOT interchangeable: a halo (incl. "hidden halo") is NOT a cluster; a three-stone is NOT a cluster; a bypass/five-stone/row ring is NOT a cluster; a solitaire is NOT a cluster.
-• METAL COLOR — yellow / white / rose / two-tone (DISTINCT; yellow gold ≠ white gold ≠ rose gold ≠ two-tone).
-• METAL TYPE — gold vs platinum vs sterling silver vs steel (DISTINCT).
+• METAL / TONE — apply the METAL vs TONE rules below.
 • DIAMOND/STONE ORIGIN — natural vs lab-grown (a.k.a. lab-created / lab grown / man-made / synthetic).
 • ITEM TYPE — ring / bracelet / necklace / pendant / earrings / watch / brooch, etc.
 • BRAND — e.g. Tiffany & Co., Cartier, Rolex, Grand Seiko (Grand Seiko is NOT Seiko).
 • PRIMARY GEMSTONE TYPE — diamond / sapphire / ruby / emerald / pearl, etc.
 • (Watches) DIAL COLOR.
 
-KARAT IS NOT A GATE: karat/purity (10K vs 14K vs 18K) is never a hard requirement — a "14K yellow gold" request is satisfied by an 18K yellow gold item (same color/type). Only metal COLOR and metal TYPE gate; never karat.
+${metalToneRules()}
 
 Do NOT over-apply vague/aesthetic terms ("elegant", "classic", "dainty") — those shade ranking, they are not gates.
 
@@ -118,8 +118,9 @@ export const BATCH_VERIFY_SYSTEM = `You are an expert jeweler doing a STRICT fin
 
 Apply attribute-by-attribute gating to EACH product:
 - Every attribute the customer SPECIFIES is an INDEPENDENT HARD requirement — the product must satisfy it or be match=false. Every attribute NOT specified is unconstrained (ignore it). ALL specified attributes must pass together (AND); a strong match on one never compensates for failing another.
-- Specifiable attributes: SETTING/form (cluster, solitaire, halo, three-stone, eternity, tennis, signet, pavé, channel-set, bezel, stud, hoop, huggie, riviera — MUTUALLY EXCLUSIVE: a halo incl. "hidden halo" is NOT a cluster; three-stone is NOT a cluster; bypass/five-stone/row is NOT a cluster; solitaire is NOT a cluster); METAL COLOR (yellow/white/rose/two-tone — distinct); METAL TYPE (gold/platinum/sterling silver/steel — distinct); DIAMOND/STONE ORIGIN (natural vs lab-grown); ITEM TYPE (ring/bracelet/necklace/pendant/earrings/watch...); BRAND (Grand Seiko ≠ Seiko); PRIMARY GEMSTONE TYPE; (watches) DIAL COLOR.
-- KARAT IS NOT A GATE: 10K/14K/18K never gates — a "14K yellow gold" request is satisfied by 18K yellow gold. Only metal COLOR and metal TYPE gate.
+- Specifiable attributes: SETTING/form (cluster, solitaire, halo, three-stone, eternity, tennis, signet, pavé, channel-set, bezel, stud, hoop, huggie, riviera — MUTUALLY EXCLUSIVE: a halo incl. "hidden halo" is NOT a cluster; three-stone is NOT a cluster; bypass/five-stone/row is NOT a cluster; solitaire is NOT a cluster); METAL/TONE (see the rules below); DIAMOND/STONE ORIGIN (natural vs lab-grown); ITEM TYPE (ring/bracelet/necklace/pendant/earrings/watch...); BRAND (Grand Seiko ≠ Seiko); PRIMARY GEMSTONE TYPE; (watches) DIAL COLOR.
+
+${metalToneRules()}
 
 Respond with ONLY a JSON object (begin with "{", no other text) giving a verdict for EVERY product id provided:
 {"results":[{"product_id":"<id>","match":true|false,"reason":"one short sentence"}]}`;
