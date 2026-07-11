@@ -74,8 +74,38 @@ function upsertMatch(shop, request, p, fields) {
  */
 export async function runMatchesForRequest(_admin, request) {
   const reqVec = await getRequestEmbedding(request);
-  if (!reqVec) return 0; // no query embedding → cannot retrieve semantically
+  if (!reqVec) {
+    // No query embedding. If we HAVE a key, this is a failure (embedding service
+    // down) worth retrying; otherwise it's just an unconfigured no-op.
+    if (hasEmbeddingKey()) await setMatchState(request.id, "error", "could not embed request");
+    return 0;
+  }
 
+  try {
+    return await runMatchesInner(request, reqVec);
+  } catch (err) {
+    console.error("[matchRunner] matching failed for request", request.id, err?.message || err);
+    await setMatchState(request.id, "error", String(err?.message || err));
+    return 0;
+  }
+}
+
+// Records the outcome of a matching pass so the UI can distinguish a transient
+// failure ("error", offer Retry) from a genuine empty result ("ok", watching).
+async function setMatchState(requestId, state, error = null) {
+  await prisma.request
+    .update({
+      where: { id: requestId },
+      data: {
+        matchState: state,
+        matchError: error ? String(error).slice(0, 500) : null,
+        ...(state === "ok" ? { matchedAt: new Date() } : {}),
+      },
+    })
+    .catch(() => {});
+}
+
+async function runMatchesInner(request, reqVec) {
   const declined = await prisma.match.findMany({
     where: { requestId: request.id, declined: true },
     select: { productId: true },
@@ -163,6 +193,9 @@ export async function runMatchesForRequest(_admin, request) {
     }
   }
   await Promise.all(ops);
+  // Matching completed successfully — even if zero matches (a genuine "watching"
+  // state, NOT an error).
+  await setMatchState(request.id, "ok");
 
   if (notify.length > 0 && process.env.RESEND_API_KEY) {
     sendMatchSummaryEmail({
@@ -249,11 +282,19 @@ export async function matchProductAgainstRequests(shop, product) {
     if (!reqVec) continue;
     if (cosineSimilarity(reqVec, prodVec) < RETRIEVAL_GATE) continue;
 
-    const matches = await reasonMatches({
-      description: request.description || "",
-      budget: null, // budget is a soft ranking factor, never an AI gate
-      candidates: [{ productId: product.id, title: product.title, description: product.description, price: product.price }],
-    });
+    let matches;
+    try {
+      matches = await reasonMatches({
+        description: request.description || "",
+        budget: null, // budget is a soft ranking factor, never an AI gate
+        candidates: [{ productId: product.id, title: product.title, description: product.description, price: product.price }],
+      });
+    } catch (err) {
+      // Transient reasoning failure — skip WITHOUT recording a MatchEval so this
+      // pair is retried on the next webhook rather than being wrongly dedup'd.
+      console.error("[keep-watching] reasoning failed for request", request.id, err?.message || err);
+      continue;
+    }
     let m = matches.find((x) => x.productId === product.id);
     // Batched strict double-check on this single candidate.
     if (m) {

@@ -12,6 +12,27 @@ function getClient() {
 
 const MODEL = "claude-sonnet-4-6";
 
+// Retry a flaky async op (transient API error, overload, or an unparseable /
+// truncated model response) with exponential backoff + jitter. Throws the last
+// error if every attempt fails, so callers can distinguish "failed" from a
+// genuine empty result.
+async function withRetry(fn, { tries = 3, base = 600, label = "op" } = {}) {
+  let lastErr;
+  for (let i = 0; i < tries; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      if (i < tries - 1) {
+        const delay = base * 2 ** i + Math.floor(Math.random() * base);
+        console.warn(`[${label}] attempt ${i + 1}/${tries} failed (${err?.message || err}); retrying in ${delay}ms`);
+        await new Promise((r) => setTimeout(r, delay));
+      }
+    }
+  }
+  throw lastErr;
+}
+
 export const SYSTEM = `You are an expert jeweler matching a customer's special-order request against candidate inventory. You are given the request and a list of candidate products (title + description). Return ONLY the candidates that genuinely satisfy the request, applying STRICT attribute-by-attribute gating. This single pass is the final decision — be as rigorous per item as if you were checking each one individually.
 
 ATTRIBUTE-BY-ATTRIBUTE GATING:
@@ -60,8 +81,10 @@ function parseJsonObject(raw) {
 /**
  * AI reasoning pass. `candidates` = [{ productId, title, description, price }].
  * Returns [{ productId, confidence, reason }] ranked high→low, filtered to the
- * provided candidate ids. Returns [] on failure (caller falls back to retrieval
- * order so the screen is never empty).
+ * provided candidate ids. An EMPTY array is a valid "nothing matched" result.
+ * THROWS if the API call or response parsing fails on every retry, so the caller
+ * can record an error state (and never mistake a transient failure for "0 in
+ * stock"). Returns [] only when there's no client/candidates (a real empty).
  */
 export async function reasonMatches({ description, budget, candidates }) {
   const c = getClient();
@@ -82,25 +105,25 @@ ${JSON.stringify(list)}
 
 Return the JSON verdict now.`;
 
-  let resp;
-  try {
-    resp = await c.messages.create({
-      model: MODEL,
-      max_tokens: 8000,
-      system: SYSTEM,
-      messages: [{ role: "user", content: user }],
-    });
-  } catch (err) {
-    console.error("reasonMatches API error:", err?.message || err);
-    return [];
-  }
-
-  const raw = resp.content?.[0]?.type === "text" ? resp.content[0].text : "";
-  const parsed = parseJsonObject(raw);
-  if (!parsed || !Array.isArray(parsed.matches)) {
-    console.error("reasonMatches: unparseable response:", raw.slice(0, 300));
-    return [];
-  }
+  const parsed = await withRetry(
+    async () => {
+      const resp = await c.messages.create({
+        model: MODEL,
+        max_tokens: 8000,
+        system: SYSTEM,
+        messages: [{ role: "user", content: user }],
+      });
+      const raw = resp.content?.[0]?.type === "text" ? resp.content[0].text : "";
+      const obj = parseJsonObject(raw);
+      if (!obj || !Array.isArray(obj.matches)) {
+        // Truncated (stop_reason "max_tokens") or non-JSON output — retry rather
+        // than silently returning an empty (false "no matches") result.
+        throw new Error(`unparseable response (stop=${resp.stop_reason}): ${raw.slice(0, 120)}`);
+      }
+      return obj;
+    },
+    { tries: 3, label: "reasonMatches" },
+  );
 
   const validIds = new Set(candidates.map((p) => p.productId));
   const rank = { high: 0, medium: 1, low: 2 };
@@ -146,15 +169,23 @@ ${JSON.stringify(list)}
 
 Return a verdict for every product id. Return the JSON now.`;
   try {
-    const resp = await c.messages.create({
-      model: VERIFY_MODEL,
-      max_tokens: 4000,
-      system: BATCH_VERIFY_SYSTEM,
-      messages: [{ role: "user", content: user }],
-    });
-    const raw = resp.content?.[0]?.type === "text" ? resp.content[0].text : "";
-    const parsed = parseJsonObject(raw);
-    if (!parsed || !Array.isArray(parsed.results)) return allIds;
+    const parsed = await withRetry(
+      async () => {
+        const resp = await c.messages.create({
+          model: VERIFY_MODEL,
+          max_tokens: 4000,
+          system: BATCH_VERIFY_SYSTEM,
+          messages: [{ role: "user", content: user }],
+        });
+        const raw = resp.content?.[0]?.type === "text" ? resp.content[0].text : "";
+        const obj = parseJsonObject(raw);
+        if (!obj || !Array.isArray(obj.results)) {
+          throw new Error(`unparseable verify response (stop=${resp.stop_reason})`);
+        }
+        return obj;
+      },
+      { tries: 3, label: "verifyBatch" },
+    );
     const pass = new Set();
     for (const rrr of parsed.results) {
       if (allIds.has(rrr.product_id) && rrr.match !== false) pass.add(rrr.product_id);

@@ -58,6 +58,7 @@ export const action = async ({ request }) => {
       budget: Number.isFinite(budget) ? budget : null,
       priority: "normal",
       pinned: false,
+      matchState: "pending",
     },
   });
 

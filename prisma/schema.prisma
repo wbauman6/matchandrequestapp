@@ -49,6 +49,15 @@ model Request {
   facets           Json?
   itemType         String?
   embedding        Json?
+  // Matching lifecycle so a transient AI/matching failure is distinguishable
+  // from a genuine "nothing in stock" result:
+  //   "pending" — background match hasn't finished yet
+  //   "ok"      — match completed (0 matches here is a real "watching" state)
+  //   "error"   — the reasoning/matching pass failed and should be retried
+  //   null      — legacy request created before this field (treat as "ok")
+  matchState       String?
+  matchError       String?
+  matchedAt        DateTime?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
   matches          Match[]

@@ -4,6 +4,7 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { sendNoteEmail } from "../lib/email.server";
+import { runMatchesForRequest } from "../lib/matchRunner.server";
 
 export const loader = async ({ request, params }) => {
   const { session } = await authenticate.admin(request);
@@ -50,6 +51,22 @@ export const action = async ({ request, params }) => {
       where: { id: params.id },
       data: { status: String(data.get("status")) },
     });
+  }
+
+  if (act === "rematch") {
+    // Re-run matching for a request whose initial pass failed (or that a user
+    // wants refreshed). Runs synchronously — runMatchesForRequest records the
+    // new matchState ("ok"/"error") itself.
+    const req = await prisma.request.findFirst({
+      where: { id: params.id, shop: session.shop },
+    });
+    if (req) {
+      await prisma.request.update({
+        where: { id: req.id },
+        data: { matchState: "pending", matchError: null },
+      });
+      await runMatchesForRequest(null, req);
+    }
   }
 
   if (act === "decline-all") {
@@ -637,23 +654,96 @@ export default function RequestDetailPage() {
         </div>
 
         {req.matches.length === 0 ? (
-          <div
-            style={{
-              textAlign: "center",
-              padding: "40px 20px",
-              margin: 0,
-            }}
-          >
-            <div style={{ fontSize: 28, marginBottom: 8 }}>👀</div>
-            <p style={{ color: "#202223", fontWeight: 600, margin: "0 0 4px" }}>
-              Not in stock yet — watching this request
-            </p>
-            <p style={{ color: "#6d7175", margin: 0, fontSize: 13 }}>
-              Nothing currently in inventory matches all of this request&apos;s
-              requirements. This request stays active, and you&apos;ll be alerted
-              automatically if matching inventory arrives.
-            </p>
-          </div>
+          req.matchState === "error" ? (
+            /* Matching failed (transient AI/service error) — offer a retry so a
+               genuine result isn't mistaken for "nothing in stock". */
+            <div style={{ textAlign: "center", padding: "40px 20px", margin: 0 }}>
+              <div style={{ fontSize: 28, marginBottom: 8 }}>⚠️</div>
+              <p style={{ color: "#b12b18", fontWeight: 600, margin: "0 0 4px" }}>
+                Couldn&apos;t finish finding matches
+              </p>
+              <p style={{ color: "#6d7175", margin: "0 0 16px", fontSize: 13 }}>
+                A temporary error interrupted matching for this request — this is
+                <strong> not</strong> a &quot;nothing in stock&quot; result. Retry to run it again.
+              </p>
+              <Form method="post" style={{ display: "inline-block" }}>
+                <input type="hidden" name="_action" value="rematch" />
+                <button
+                  type="submit"
+                  style={{
+                    background: "#008060",
+                    color: "#fff",
+                    border: "none",
+                    borderRadius: 6,
+                    padding: "8px 20px",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  Retry matching
+                </button>
+              </Form>
+            </div>
+          ) : req.matchState === "pending" ? (
+            /* Background match still running (POS create returns instantly). */
+            <div style={{ textAlign: "center", padding: "40px 20px", margin: 0 }}>
+              <div style={{ fontSize: 28, marginBottom: 8 }}>⏳</div>
+              <p style={{ color: "#202223", fontWeight: 600, margin: "0 0 4px" }}>
+                Finding matches…
+              </p>
+              <p style={{ color: "#6d7175", margin: "0 0 16px", fontSize: 13 }}>
+                Matching is running in the background. Refresh in a few seconds — or
+                run it now.
+              </p>
+              <Form method="post" style={{ display: "inline-block" }}>
+                <input type="hidden" name="_action" value="rematch" />
+                <button
+                  type="submit"
+                  style={{
+                    background: "#fff",
+                    border: "1px solid #c9cccf",
+                    borderRadius: 6,
+                    padding: "8px 20px",
+                    fontSize: 13,
+                    cursor: "pointer",
+                    color: "#414547",
+                  }}
+                >
+                  Run now
+                </button>
+              </Form>
+            </div>
+          ) : (
+            <div style={{ textAlign: "center", padding: "40px 20px", margin: 0 }}>
+              <div style={{ fontSize: 28, marginBottom: 8 }}>👀</div>
+              <p style={{ color: "#202223", fontWeight: 600, margin: "0 0 4px" }}>
+                Not in stock yet — watching this request
+              </p>
+              <p style={{ color: "#6d7175", margin: "0 0 16px", fontSize: 13 }}>
+                Nothing currently in inventory matches all of this request&apos;s
+                requirements. This request stays active, and you&apos;ll be alerted
+                automatically if matching inventory arrives.
+              </p>
+              <Form method="post" style={{ display: "inline-block" }}>
+                <input type="hidden" name="_action" value="rematch" />
+                <button
+                  type="submit"
+                  style={{
+                    background: "#fff",
+                    border: "1px solid #c9cccf",
+                    borderRadius: 6,
+                    padding: "6px 16px",
+                    fontSize: 12,
+                    cursor: "pointer",
+                    color: "#616161",
+                  }}
+                >
+                  Re-check inventory
+                </button>
+              </Form>
+            </div>
+          )
         ) : (
           <div
             style={{

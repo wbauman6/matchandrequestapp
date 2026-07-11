@@ -46,6 +46,7 @@ export const action = async ({ request }) => {
         budget: Number.isFinite(budget) ? budget : null,
         priority: String(data.get("priority") || "normal"),
         pinned: data.get("pinned") === "on",
+        matchState: "pending",
       },
     });
     await runMatchesForRequest(admin, req);
