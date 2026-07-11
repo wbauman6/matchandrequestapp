@@ -35,7 +35,6 @@ function Modal() {
   const [pickedEmail, setPickedEmail] = useState(null); // salesperson email for admins
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
-  const [result, setResult] = useState(null); // { matchCount }
 
   useEffect(() => {
     let cancelled = false;
@@ -72,7 +71,6 @@ function Modal() {
   const startNew = () => {
     setForm(EMPTY_FORM);
     setSaveError("");
-    setResult(null);
     if (boot.status === "ready" && boot.data.linked) {
       setPickedEmail(boot.data.salesperson.email);
     }
@@ -114,7 +112,6 @@ function Modal() {
       if (!res.ok || data.error) {
         throw new Error(data.error || `Server returned ${res.status}`);
       }
-      setResult({ matchCount: data.matchCount ?? 0 });
       setView("saved");
     } catch (err) {
       setSaveError(String(err?.message || err));
@@ -177,23 +174,16 @@ function Modal() {
 
   // ---- Saved confirmation ----
   if (view === "saved") {
-    const n = result?.matchCount ?? 0;
     return (
       <s-page heading="Request created">
         <s-stack direction="block" gap="base">
-          <s-banner
-            tone="success"
-            heading={
-              n > 0
-                ? `Found ${n} match${n === 1 ? "" : "es"}`
-                : "No matches yet — watching"
-            }
-          />
+          <s-banner tone="success" heading="Request saved" />
           <s-section heading="What happens next">
             <s-text>
-              {n > 0
-                ? "Matches are ready in the app. Viewing and acting on matches directly on POS is coming in the next step."
-                : "Nothing in stock matches yet. The request stays active and the salesperson is alerted automatically when matching inventory arrives."}
+              We're searching inventory for matches now. The salesperson is
+              emailed automatically on strong matches, and the request stays
+              active — new arrivals are matched as they come in. (Viewing matches
+              directly on POS is coming next.)
             </s-text>
           </s-section>
           <s-stack direction="inline" gap="base">

@@ -1,3 +1,4 @@
+import { waitUntil } from "@vercel/functions";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { runMatchesForRequest } from "../lib/matchRunner.server";
@@ -60,15 +61,22 @@ export const action = async ({ request }) => {
     },
   });
 
-  let matchCount = 0;
+  // Matching (semantic retrieval + AI reasoning) takes longer than a POS user
+  // should wait and can exceed a normal request budget. Run it in the background
+  // via waitUntil so the create returns instantly; the function stays alive to
+  // finish matching (and email on strong matches). Matches are viewed on the
+  // results screen. On non-Vercel runtimes waitUntil is unavailable, so fall
+  // back to a detached promise.
+  const matchWork = runMatchesForRequest(null, req).catch((err) => {
+    console.error("[pos/requests] background matching failed:", err);
+  });
   try {
-    matchCount = await runMatchesForRequest(null, req);
-  } catch (err) {
-    // The request is saved regardless; matching failures shouldn't lose the entry.
-    console.error("[pos/requests] matching failed:", err);
+    waitUntil(matchWork);
+  } catch {
+    void matchWork;
   }
 
-  return cors(Response.json({ ok: true, id: req.id, matchCount }));
+  return cors(Response.json({ ok: true, id: req.id }));
 };
 
 // authenticate.pos handles the CORS preflight (OPTIONS) here too.

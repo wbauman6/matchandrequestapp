@@ -3,7 +3,7 @@
   "outputDirectory": "build/client",
   "functions": {
     "api/handler.js": {
-      "maxDuration": 30,
+      "maxDuration": 120,
       "includeFiles": "{build/**,node_modules/.prisma/client/**,node_modules/@prisma/client/**}"
     }
   },
