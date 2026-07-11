@@ -6,7 +6,7 @@ type = "ui_extension"
 name = "t:name"
 uid = "b782b75a-7d98-79a1-c592-f9cc2ac8210e6abc36de"
 handle = "requests-pos"
-description = "A preact POS UI extension"
+description = "Customer special-order requests and inventory matches on POS"
 
 # module: file that contains your extension’s source code
 # target: location where your extension appears in POS

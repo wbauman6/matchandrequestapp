@@ -8,7 +8,7 @@ export default async () => {
 function Tile() {
   return (
     <s-tile
-      heading="Requests"
+      heading="Match and Request"
       subheading="Customer special orders"
       onClick={() => shopify.action.presentModal()}
     />

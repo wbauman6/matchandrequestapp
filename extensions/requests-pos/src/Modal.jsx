@@ -51,7 +51,7 @@ function Modal() {
 
   if (state.status === "loading") {
     return (
-      <s-page heading="Requests">
+      <s-page heading="Match and Request">
         <s-stack direction="inline" gap="base" alignItems="center">
           <s-spinner accessibilityLabel="Identifying you" />
           <s-text>Identifying you…</s-text>
@@ -62,7 +62,7 @@ function Modal() {
 
   if (state.status === "error") {
     return (
-      <s-page heading="Requests">
+      <s-page heading="Match and Request">
         <s-banner tone="critical" heading="Couldn't identify you">
           <s-text>{state.message}. Pull down to retry or reopen the tile.</s-text>
         </s-banner>
@@ -74,7 +74,7 @@ function Modal() {
 
   if (!data.linked) {
     return (
-      <s-page heading="Requests">
+      <s-page heading="Match and Request">
         <s-banner tone="warning" heading="You're not linked yet">
           <s-stack direction="block" gap="base">
             <s-text>
@@ -98,7 +98,7 @@ function Modal() {
   const isAdmin = sp.role === "admin";
 
   return (
-    <s-page heading="Requests">
+    <s-page heading="Match and Request">
       <s-stack direction="block" gap="base">
         <s-section heading="Signed in as">
           <s-stack direction="block" gap="small">
