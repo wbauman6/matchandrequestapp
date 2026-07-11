@@ -34,6 +34,11 @@ async function resolveIdentity(request) {
     });
   }
 
+  // TEMP debug — remove after identity mapping is confirmed on the iPad.
+  console.log(
+    `[pos/me] dest=${sessionToken.dest} shop=${shop} staffMemberId="${staffMemberId}" matched=${salesperson ? salesperson.name + "/" + salesperson.role : "none"}`,
+  );
+
   if (salesperson) {
     return cors(
       Response.json({
