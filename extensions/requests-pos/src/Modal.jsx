@@ -190,6 +190,19 @@ function Modal() {
     setView("detail");
   };
 
+  // Open a matched product's listing on the native POS product-details screen.
+  // Match.productId is a GID (gid://shopify/Product/123); POS deep links use the
+  // numeric id.
+  const openProduct = (productGid) => {
+    const numId = String(productGid || "").split("/").pop();
+    if (!numId) return;
+    try {
+      navigation.navigate(`shopify:point-of-sale/products/${numId}`);
+    } catch {
+      // navigation may be unavailable in some contexts — no-op.
+    }
+  };
+
   async function submit() {
     const me = boot.data.salesperson;
     const isAdmin = me.role === "admin";
@@ -330,26 +343,31 @@ function Modal() {
                   const conf = confInfo(m);
                   return (
                     <s-section heading={m.productTitle}>
-                      <s-stack direction="block" gap="small">
-                        {m.productImage ? (
-                          <s-box blockSize="200px">
-                            <s-image
-                              src={m.productImage}
-                              alt={m.productTitle}
-                              inlineSize="fill"
-                              objectFit="contain"
-                            />
-                          </s-box>
-                        ) : null}
-                        {m.productPrice != null ? (
-                          <s-text>{money(m.productPrice)}</s-text>
-                        ) : null}
-                        <s-badge tone={conf.tone}>
-                          {conf.label}
-                          {m.overBudget ? " · over budget" : ""}
-                        </s-badge>
-                        {m.reasoning ? <s-text>{m.reasoning}</s-text> : null}
-                      </s-stack>
+                      <s-clickable onClick={() => openProduct(m.productId)}>
+                        <s-box padding="small">
+                          <s-stack direction="block" gap="small">
+                            {m.productImage ? (
+                              <s-box blockSize="200px">
+                                <s-image
+                                  src={m.productImage}
+                                  alt={m.productTitle}
+                                  inlineSize="fill"
+                                  objectFit="contain"
+                                />
+                              </s-box>
+                            ) : null}
+                            {m.productPrice != null ? (
+                              <s-text>{money(m.productPrice)}</s-text>
+                            ) : null}
+                            <s-badge tone={conf.tone}>
+                              {conf.label}
+                              {m.overBudget ? " · over budget" : ""}
+                            </s-badge>
+                            {m.reasoning ? <s-text>{m.reasoning}</s-text> : null}
+                            <s-text tone="info">Tap to open product →</s-text>
+                          </s-stack>
+                        </s-box>
+                      </s-clickable>
                     </s-section>
                   );
                 })
