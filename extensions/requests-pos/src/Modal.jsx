@@ -23,21 +23,40 @@ async function authHeaders(base = {}) {
   return headers;
 }
 
+const money = (n) => (n == null ? null : `$${Number(n).toLocaleString()}`);
+
+function confInfo(m) {
+  const c = (m.confidence || "").toLowerCase();
+  if (c === "high" || (!c && m.score >= 70)) {
+    return { tone: "success", label: "High confidence" };
+  }
+  if (c === "medium" || (!c && m.score >= 40)) {
+    return { tone: "warning", label: "Medium confidence" };
+  }
+  return {
+    tone: "neutral",
+    label: c ? `${c[0].toUpperCase()}${c.slice(1)} confidence` : "Low confidence",
+  };
+}
+
 function Modal() {
   // Identity bootstrap: "loading" | "ready" | "error"
   const [boot, setBoot] = useState({ status: "loading" });
-  // In-app view once linked: "home" | "create" | "saved"
+  // View: "home" | "create" | "saved" | "detail"
   const [view, setView] = useState("home");
 
+  // Requests list (role-filtered) + the request currently open in detail.
+  const [reqState, setReqState] = useState({ status: "idle", requests: [] });
+  const [detailReq, setDetailReq] = useState(null);
+
   const [form, setForm] = useState(EMPTY_FORM);
-  // Salesperson defaults to the logged-in person; admins can optionally reassign.
   const [pickedEmail, setPickedEmail] = useState(null);
   const [assigning, setAssigning] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
 
   // Customer picker (search Shopify customers by name/email/phone).
-  const [customer, setCustomer] = useState(null); // { id, name, email, phone }
+  const [customer, setCustomer] = useState(null);
   const [custQuery, setCustQuery] = useState("");
   const [custResults, setCustResults] = useState([]);
   const [custSearching, setCustSearching] = useState(false);
@@ -72,6 +91,38 @@ function Modal() {
       cancelled = true;
     };
   }, []);
+
+  async function loadRequests() {
+    if (boot.status !== "ready" || !boot.data?.linked) return;
+    setReqState((s) => ({ ...s, status: "loading" }));
+    try {
+      const res = await fetch(
+        `/api/pos/requests?staffMemberId=${encodeURIComponent(
+          boot.staffMemberId ?? "",
+        )}`,
+        { headers: await authHeaders() },
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(`Server returned ${res.status}`);
+      setReqState({
+        status: "ready",
+        requests: data.requests || [],
+        role: data.role,
+      });
+    } catch (err) {
+      setReqState({
+        status: "error",
+        requests: [],
+        error: String(err?.message || err),
+      });
+    }
+  }
+
+  // Load the request list once identity is resolved.
+  useEffect(() => {
+    if (boot.status === "ready" && boot.data?.linked) loadRequests();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [boot.status]);
 
   // Debounced customer search — fires 300ms after typing stops.
   useEffect(() => {
@@ -134,6 +185,11 @@ function Modal() {
     setView("create");
   };
 
+  const openRequest = (r) => {
+    setDetailReq(r);
+    setView("detail");
+  };
+
   async function submit() {
     const me = boot.data.salesperson;
     const isAdmin = me.role === "admin";
@@ -174,6 +230,7 @@ function Modal() {
       if (!res.ok || data.error) {
         throw new Error(data.error || `Server returned ${res.status}`);
       }
+      loadRequests();
       setView("saved");
     } catch (err) {
       setSaveError(String(err?.message || err));
@@ -240,6 +297,70 @@ function Modal() {
       ? roster.find((s) => s.email === pickedEmail)?.name || me.name
       : me.name;
 
+  // ---- Request detail (matched products) ----
+  if (view === "detail" && detailReq) {
+    const r = detailReq;
+    return (
+      <s-page heading={r.customerName}>
+        <s-scroll-box>
+          <s-stack direction="block" gap="base">
+            <s-button variant="secondary" onClick={() => setView("home")}>
+              ← Back to requests
+            </s-button>
+
+            <s-section heading="Request">
+              <s-stack direction="block" gap="small">
+                {r.description ? <s-text>{r.description}</s-text> : null}
+                {r.budget != null ? <s-text>Budget: {money(r.budget)}</s-text> : null}
+                <s-text>Salesperson: {r.salespersonName}</s-text>
+              </s-stack>
+            </s-section>
+
+            <s-section heading={`Matches (${r.matchCount})`}>
+              {r.matches.length === 0 ? (
+                <s-stack direction="block" gap="small">
+                  <s-banner tone="info" heading="Not in stock yet — watching" />
+                  <s-text>
+                    Nothing in inventory matches yet. This request stays active and
+                    the salesperson is alerted when matching stock arrives.
+                  </s-text>
+                </s-stack>
+              ) : (
+                r.matches.map((m) => {
+                  const conf = confInfo(m);
+                  return (
+                    <s-section heading={m.productTitle}>
+                      <s-stack direction="block" gap="small">
+                        {m.productImage ? (
+                          <s-box blockSize="200px">
+                            <s-image
+                              src={m.productImage}
+                              alt={m.productTitle}
+                              inlineSize="fill"
+                              objectFit="contain"
+                            />
+                          </s-box>
+                        ) : null}
+                        {m.productPrice != null ? (
+                          <s-text>{money(m.productPrice)}</s-text>
+                        ) : null}
+                        <s-badge tone={conf.tone}>
+                          {conf.label}
+                          {m.overBudget ? " · over budget" : ""}
+                        </s-badge>
+                        {m.reasoning ? <s-text>{m.reasoning}</s-text> : null}
+                      </s-stack>
+                    </s-section>
+                  );
+                })
+              )}
+            </s-section>
+          </s-stack>
+        </s-scroll-box>
+      </s-page>
+    );
+  }
+
   // ---- Saved confirmation ----
   if (view === "saved") {
     return (
@@ -251,8 +372,8 @@ function Modal() {
               <s-text>
                 We're searching inventory for matches now. The salesperson is
                 emailed automatically on strong matches, and the request stays
-                active — new arrivals are matched as they come in. (Viewing
-                matches directly on POS is coming next.)
+                active — new arrivals are matched as they come in. Matches appear
+                on the requests list (refresh in a moment).
               </s-text>
             </s-section>
             <s-stack direction="block" gap="base">
@@ -384,22 +505,65 @@ function Modal() {
     );
   }
 
-  // ---- Home ----
+  // ---- Home: identity + role-filtered request list ----
+  const requests = reqState.requests || [];
   return (
     <s-page heading="Match and Request">
-      <s-stack direction="block" gap="base">
-        <s-section heading="Signed in as">
+      <s-scroll-box>
+        <s-stack direction="block" gap="base">
           <s-stack direction="block" gap="small">
-            <s-text>{me.name}</s-text>
+            <s-text>Signed in as {me.name}</s-text>
             <s-badge tone={isAdmin ? "info" : "success"}>
-              {isAdmin ? "Admin — sees all requests" : "Salesperson — sees own requests"}
+              {isAdmin ? "Admin — all requests" : "Salesperson — your requests"}
             </s-badge>
           </s-stack>
-        </s-section>
-        <s-button variant="primary" onClick={startNew}>
-          New request
-        </s-button>
-      </s-stack>
+
+          <s-stack direction="block" gap="base">
+            <s-button variant="primary" onClick={startNew}>
+              New request
+            </s-button>
+            <s-button
+              variant="secondary"
+              loading={reqState.status === "loading"}
+              onClick={loadRequests}
+            >
+              Refresh
+            </s-button>
+          </s-stack>
+
+          {reqState.status === "loading" && requests.length === 0 ? (
+            <s-stack direction="inline" gap="base" alignItems="center">
+              <s-spinner accessibilityLabel="Loading requests" />
+              <s-text>Loading requests…</s-text>
+            </s-stack>
+          ) : reqState.status === "error" ? (
+            <s-text tone="critical">
+              Couldn't load requests: {reqState.error}
+            </s-text>
+          ) : requests.length === 0 ? (
+            <s-section heading="Requests">
+              <s-text>No active requests yet. Tap “New request” to add one.</s-text>
+            </s-section>
+          ) : (
+            requests.map((r) => (
+              <s-section heading={r.customerName}>
+                <s-stack direction="block" gap="small">
+                  {isAdmin ? (
+                    <s-text>Salesperson: {r.salespersonName}</s-text>
+                  ) : null}
+                  {r.description ? <s-text>{r.description}</s-text> : null}
+                  {r.budget != null ? <s-text>Budget: {money(r.budget)}</s-text> : null}
+                  <s-button variant="secondary" onClick={() => openRequest(r)}>
+                    {r.matchCount > 0
+                      ? `View ${r.matchCount} match${r.matchCount === 1 ? "" : "es"}`
+                      : "Watching — no matches yet"}
+                  </s-button>
+                </s-stack>
+              </s-section>
+            ))
+          )}
+        </s-stack>
+      </s-scroll-box>
     </s-page>
   );
 }

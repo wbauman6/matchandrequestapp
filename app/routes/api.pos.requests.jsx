@@ -79,8 +79,63 @@ export const action = async ({ request }) => {
   return cors(Response.json({ ok: true, id: req.id }));
 };
 
-// authenticate.pos handles the CORS preflight (OPTIONS) here too.
+// GET /api/pos/requests?staffMemberId=123 — list active requests for the person,
+// role-filtered exactly like the admin app: admins see all, salespeople see only
+// their own (by salespersonEmail). Includes each request's non-declined matches
+// (image, title, price, confidence, reason), ordered in-budget first then score.
+// authenticate.pos also handles the CORS preflight (OPTIONS) here.
 export const loader = async ({ request }) => {
-  const { cors } = await authenticate.pos(request);
-  return cors(Response.json({ ok: true }));
+  const { sessionToken, cors } = await authenticate.pos(request);
+  const shop = shopFromDest(sessionToken.dest);
+
+  const url = new URL(request.url);
+  const staffMemberId = (url.searchParams.get("staffMemberId") || "").trim();
+
+  const salesperson = staffMemberId
+    ? await prisma.salesperson.findFirst({ where: { shop, posStaffId: staffMemberId } })
+    : null;
+
+  if (!salesperson) {
+    return cors(Response.json({ linked: false, role: "salesperson", requests: [] }));
+  }
+
+  const where = { shop, status: { in: ["active", "pending"] } };
+  if (salesperson.role !== "admin") {
+    where.salespersonEmail = salesperson.email;
+  }
+
+  const requests = await prisma.request.findMany({
+    where,
+    orderBy: [{ pinned: "desc" }, { createdAt: "desc" }],
+    include: {
+      matches: {
+        where: { declined: false },
+        orderBy: [{ overBudget: "asc" }, { score: "desc" }, { createdAt: "desc" }],
+        select: {
+          id: true,
+          productId: true,
+          productTitle: true,
+          productPrice: true,
+          productImage: true,
+          score: true,
+          confidence: true,
+          reasoning: true,
+          overBudget: true,
+        },
+      },
+    },
+  });
+
+  const shaped = requests.map((r) => ({
+    id: r.id,
+    customerName: r.customerName,
+    description: r.description,
+    budget: r.budget,
+    salespersonName: r.salespersonName,
+    status: r.status,
+    matchCount: r.matches.length,
+    matches: r.matches,
+  }));
+
+  return cors(Response.json({ linked: true, role: salesperson.role, requests: shaped }));
 };
