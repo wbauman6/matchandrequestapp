@@ -17,6 +17,7 @@ function Modal() {
       try {
         const session = shopify.session.currentSession;
         const staffMemberId = session?.staffMemberId;
+        const userId = session?.userId;
 
         // Relative URLs resolve against the app_url and auto-include the auth
         // header; we also attach the token explicitly when available.
@@ -30,13 +31,15 @@ function Modal() {
         }
 
         const res = await fetch(
-          `/api/pos/me?staffMemberId=${encodeURIComponent(staffMemberId ?? "")}`,
+          `/api/pos/me?staffMemberId=${encodeURIComponent(
+            staffMemberId ?? "",
+          )}&userId=${encodeURIComponent(userId ?? "")}`,
           { headers },
         );
         if (!res.ok) throw new Error(`Server returned ${res.status}`);
         const data = await res.json();
 
-        if (!cancelled) setState({ status: "ready", data, staffMemberId });
+        if (!cancelled) setState({ status: "ready", data, staffMemberId, userId });
       } catch (err) {
         if (!cancelled) {
           setState({ status: "error", message: String(err?.message || err) });
@@ -63,33 +66,35 @@ function Modal() {
   if (state.status === "error") {
     return (
       <s-page heading="Match and Request">
-        <s-banner tone="critical" heading="Couldn't identify you">
-          <s-text>{state.message}. Pull down to retry or reopen the tile.</s-text>
-        </s-banner>
+        <s-section heading="Couldn't identify you">
+          <s-text>{state.message}. Reopen the tile to retry.</s-text>
+        </s-section>
       </s-page>
     );
   }
 
-  const { data, staffMemberId } = state;
+  const { data, staffMemberId, userId } = state;
 
   if (!data.linked) {
     return (
       <s-page heading="Match and Request">
-        <s-banner tone="warning" heading="You're not linked yet">
-          <s-stack direction="block" gap="base">
-            <s-text>
-              Your POS account isn't connected to a salesperson profile yet, so
-              you won't see any requests. Ask an admin to add you in the app.
-            </s-text>
-            <s-text>
-              Your POS Staff ID: {String(staffMemberId ?? "unknown")}
-            </s-text>
-            <s-text>
-              An admin can paste this ID into your profile under Settings →
-              Salespeople.
-            </s-text>
-          </s-stack>
-        </s-banner>
+        <s-stack direction="block" gap="base">
+          <s-banner tone="warning" heading="You're not linked yet" />
+          <s-section heading="Ask an admin to link you">
+            <s-stack direction="block" gap="small">
+              <s-text>
+                Your POS account isn't connected to a salesperson profile yet, so
+                you won't see any requests.
+              </s-text>
+              <s-text>POS Staff ID: {String(staffMemberId ?? "unknown")}</s-text>
+              <s-text>User ID: {String(userId ?? "unknown")}</s-text>
+              <s-text>
+                An admin pastes the POS Staff ID into your profile under Settings
+                → Salespeople.
+              </s-text>
+            </s-stack>
+          </s-section>
+        </s-stack>
       </s-page>
     );
   }
