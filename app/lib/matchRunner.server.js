@@ -8,7 +8,7 @@ import {
   hasEmbeddingKey,
 } from "./embeddings.server.js";
 import { reasonMatches, verifyBatch, confidenceToScore } from "./reasoningMatch.server.js";
-import { withinBudget, isOverBudget } from "./budget.js";
+import { withinBudget, isOverBudget, budgetCeiling } from "./budget.js";
 import { sendMatchSummaryEmail, sendNewProductMatchEmail } from "./email.server.js";
 
 // --- Tunables -------------------------------------------------------------
@@ -74,30 +74,32 @@ function upsertMatch(shop, request, p, fields) {
  */
 export async function runMatchesForRequest(_admin, request) {
   const reqVec = await getRequestEmbedding(request);
+  if (!reqVec) return 0; // no query embedding → cannot retrieve semantically
 
-  const rows = await prisma.productEmbedding.findMany({
-    where: { shop: request.shop },
-    select: { productId: true, title: true, description: true, price: true, image: true, embedding: true },
-  });
   const declined = await prisma.match.findMany({
     where: { requestId: request.id, declined: true },
     select: { productId: true },
   });
   const declinedIds = new Set(declined.map((m) => m.productId));
 
-  // Step 1 — light filter (budget only).
-  let pool = rows.filter((p) => !declinedIds.has(p.productId) && withinBudget(request.budget, p.price));
-
-  // Step 2 — semantic retrieval (top K by cosine).
-  if (reqVec) {
-    pool = pool
-      .map((p) => ({ p, sim: cosineSimilarity(reqVec, p.embedding) }))
-      .sort((a, b) => b.sim - a.sim)
-      .slice(0, TOP_K)
-      .map((x) => x.p);
-  } else {
-    pool = pool.slice(0, TOP_K);
-  }
+  // Steps 1+2 — semantic retrieval + budget filter run INSIDE Postgres via
+  // pgvector, returning only the top-K rows. This avoids shipping the entire
+  // embedding table (~43 MB) out of Neon on every request.
+  const ceiling = request.budget ? budgetCeiling(request.budget) : null;
+  const vecLiteral = `[${reqVec.join(",")}]`;
+  const rows = await prisma.$queryRawUnsafe(
+    `SELECT "productId", title, description, price, image
+       FROM "ProductEmbedding"
+      WHERE shop = $1 AND vec IS NOT NULL
+        AND ($3::float8 IS NULL OR price IS NULL OR price <= $3::float8)
+      ORDER BY vec <=> $2::vector
+      LIMIT $4`,
+    request.shop,
+    vecLiteral,
+    ceiling,
+    TOP_K + declinedIds.size,
+  );
+  const pool = rows.filter((r) => !declinedIds.has(r.productId)).slice(0, TOP_K);
 
   // Step 3 — AI reasoning pass.
   const candidates = pool.map((p) => ({
@@ -130,7 +132,7 @@ export async function runMatchesForRequest(_admin, request) {
   // setting, item type, brand) must never be relaxed to avoid an empty result.
   // The request stays active and the keep-watching job matches later inventory.
 
-  const byId = new Map(rows.map((r) => [r.productId, r]));
+  const byId = new Map(pool.map((r) => [r.productId, r]));
   const ops = [];
   const notify = [];
   for (const m of matches) {

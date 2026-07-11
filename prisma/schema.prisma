@@ -140,6 +140,9 @@ model ProductEmbedding {
   productId   String   @unique
   hash        String
   embedding   Json
+  // pgvector column, kept in sync from `embedding` by a DB trigger. Queried via
+  // $queryRaw for top-K similarity search inside Postgres (see matchRunner).
+  vec         Unsupported("vector(1024)")?
   title       String?
   description String?
   productType String?
