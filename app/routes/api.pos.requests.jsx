@@ -27,18 +27,6 @@ export const action = async ({ request }) => {
     return cors(Response.json({ error: "Invalid request body" }, { status: 400 }));
   }
 
-  // TEMP diagnostic — log the raw received body and echo it back so we can see
-  // exactly what the POS extension sent. Remove after the submit bug is fixed.
-  console.log("[pos/requests] received body:", JSON.stringify(body));
-  const received = {
-    customerName: body.customerName ?? null,
-    customerEmail: body.customerEmail ?? null,
-    salespersonName: body.salespersonName ?? null,
-    salespersonEmail: body.salespersonEmail ?? null,
-    budget: body.budget ?? null,
-    description: body.description ?? null,
-  };
-
   const customerName = String(body.customerName || "").trim();
   const description = String(body.description || "").trim();
   const salespersonName = String(body.salespersonName || "").trim();
@@ -47,10 +35,7 @@ export const action = async ({ request }) => {
   if (!customerName || !description || !salespersonEmail) {
     return cors(
       Response.json(
-        {
-          error: "Customer name, description, and salesperson are required.",
-          received,
-        },
+        { error: "Customer name, description, and salesperson are required." },
         { status: 400 },
       ),
     );
@@ -83,7 +68,7 @@ export const action = async ({ request }) => {
     console.error("[pos/requests] matching failed:", err);
   }
 
-  return cors(Response.json({ ok: true, id: req.id, matchCount, received }));
+  return cors(Response.json({ ok: true, id: req.id, matchCount }));
 };
 
 // authenticate.pos handles the CORS preflight (OPTIONS) here too.

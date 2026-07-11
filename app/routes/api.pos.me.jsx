@@ -34,11 +34,6 @@ async function resolveIdentity(request) {
     });
   }
 
-  // TEMP debug — remove after identity mapping is confirmed on the iPad.
-  const userId = (url.searchParams.get("userId") || "").trim();
-  console.log(
-    `[pos/me] dest=${sessionToken.dest} shop=${shop} staffMemberId="${staffMemberId}" userId="${userId}" matched=${salesperson ? salesperson.name + "/" + salesperson.role : "none"}`,
-  );
 
   if (salesperson) {
     // Admins can create a request on behalf of another salesperson, so include

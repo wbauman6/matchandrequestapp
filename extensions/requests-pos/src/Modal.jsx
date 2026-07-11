@@ -36,7 +36,6 @@ function Modal() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [result, setResult] = useState(null); // { matchCount }
-  const [debug, setDebug] = useState(null); // TEMP diagnostic for submit bug
 
   useEffect(() => {
     let cancelled = false;
@@ -91,39 +90,34 @@ function Modal() {
       if (found) salesperson = { name: found.name, email: found.email };
     }
 
-    // TEMP diagnostic: build payload from current state and send it REGARDLESS
-    // of validation, so we can see exactly what state the form holds and what the
-    // backend receives. (Client validation intentionally bypassed for diagnosis.)
-    const payload = {
-      customerName: form.customerName,
-      customerEmail: form.customerEmail,
-      salespersonName: salesperson.name,
-      salespersonEmail: salesperson.email,
-      budget: form.budget,
-      description: form.description,
-    };
+    if (!form.customerName.trim() || !form.description.trim()) {
+      setSaveError("Customer name and description are required.");
+      return;
+    }
 
     setSaving(true);
     setSaveError("");
-    setDebug({ formSnapshot: { ...form }, sent: payload, received: null });
     try {
       const res = await fetch("/api/pos/requests", {
         method: "POST",
         headers: await authHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          customerName: form.customerName,
+          customerEmail: form.customerEmail,
+          salespersonName: salesperson.name,
+          salespersonEmail: salesperson.email,
+          budget: form.budget,
+          description: form.description,
+        }),
       });
       const data = await res.json().catch(() => ({}));
-      setDebug((d) => ({
-        ...d,
-        received: data.received ?? null,
-        status: res.status,
-        serverError: data.error ?? null,
-        matchCount: data.matchCount ?? null,
-      }));
-      setView("debug");
+      if (!res.ok || data.error) {
+        throw new Error(data.error || `Server returned ${res.status}`);
+      }
+      setResult({ matchCount: data.matchCount ?? 0 });
+      setView("saved");
     } catch (err) {
-      setDebug((d) => ({ ...d, fetchError: String(err?.message || err) }));
-      setView("debug");
+      setSaveError(String(err?.message || err));
     } finally {
       setSaving(false);
     }
@@ -181,35 +175,6 @@ function Modal() {
   const isAdmin = me.role === "admin";
   const roster = data.salespeople || [];
 
-  // ---- TEMP diagnostic view ----
-  if (view === "debug") {
-    return (
-      <s-page heading="Submit diagnostic">
-        <s-stack direction="block" gap="base">
-          <s-section heading="Form state at submit">
-            <s-text>{JSON.stringify(debug?.formSnapshot ?? {})}</s-text>
-          </s-section>
-          <s-section heading="Payload sent">
-            <s-text>{JSON.stringify(debug?.sent ?? {})}</s-text>
-          </s-section>
-          <s-section heading="Backend received">
-            <s-text>{JSON.stringify(debug?.received ?? debug?.fetchError ?? "no response")}</s-text>
-          </s-section>
-          <s-section heading="Result">
-            <s-text>
-              status={String(debug?.status ?? "—")} matchCount=
-              {String(debug?.matchCount ?? "—")} error=
-              {String(debug?.serverError ?? "none")}
-            </s-text>
-          </s-section>
-          <s-button variant="secondary" onClick={() => setView("create")}>
-            Back to form
-          </s-button>
-        </s-stack>
-      </s-page>
-    );
-  }
-
   // ---- Saved confirmation ----
   if (view === "saved") {
     const n = result?.matchCount ?? 0;
@@ -253,13 +218,13 @@ function Modal() {
             label="Customer name"
             value={form.customerName}
             required
-            onChange={(e) => updateForm("customerName", e.currentTarget.value)}
+            onInput={(e) => updateForm("customerName", e.currentTarget.value)}
           />
           <s-text-field
             label="Customer email"
             value={form.customerEmail}
             placeholder="optional"
-            onChange={(e) => updateForm("customerEmail", e.currentTarget.value)}
+            onInput={(e) => updateForm("customerEmail", e.currentTarget.value)}
           />
 
           {isAdmin && roster.length > 0 && (
@@ -286,7 +251,7 @@ function Modal() {
             label="Budget ($)"
             value={form.budget}
             placeholder="2500"
-            onChange={(e) => updateForm("budget", e.currentTarget.value)}
+            onInput={(e) => updateForm("budget", e.currentTarget.value)}
           />
           <s-text-area
             label="Description"
@@ -294,14 +259,10 @@ function Modal() {
             rows={4}
             required
             placeholder="Describe what the customer wants in plain English (e.g. 'grand seiko watch with a round dial' or 'yellow gold tennis bracelet under $3000')"
-            onChange={(e) => updateForm("description", e.currentTarget.value)}
+            onInput={(e) => updateForm("description", e.currentTarget.value)}
           />
 
           {saveError ? <s-text tone="critical">{saveError}</s-text> : null}
-
-          <s-section heading="Live form state (diagnostic)">
-            <s-text>{JSON.stringify(form)}</s-text>
-          </s-section>
 
           <s-stack direction="inline" gap="base">
             <s-button variant="primary" loading={saving} onClick={submit}>
