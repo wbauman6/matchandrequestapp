@@ -7,8 +7,6 @@ export default async () => {
 };
 
 const EMPTY_FORM = {
-  customerName: "",
-  customerEmail: "",
   budget: "",
   description: "",
 };
@@ -35,6 +33,13 @@ function Modal() {
   const [pickedEmail, setPickedEmail] = useState(null); // salesperson email for admins
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
+
+  // Customer picker (search Shopify customers by name/email/phone).
+  const [customer, setCustomer] = useState(null); // { id, name, email, phone }
+  const [custQuery, setCustQuery] = useState("");
+  const [custResults, setCustResults] = useState([]);
+  const [custSearching, setCustSearching] = useState(false);
+  const [custError, setCustError] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -66,11 +71,60 @@ function Modal() {
     };
   }, []);
 
+  // Debounced customer search — fires 300ms after typing stops.
+  useEffect(() => {
+    if (customer || custQuery.trim().length < 2) {
+      setCustResults([]);
+      setCustError("");
+      return;
+    }
+    let cancelled = false;
+    setCustSearching(true);
+    const t = setTimeout(async () => {
+      try {
+        const res = await fetch(
+          `/api/pos/customers/search?q=${encodeURIComponent(custQuery.trim())}`,
+          { headers: await authHeaders() },
+        );
+        const data = await res.json().catch(() => ({}));
+        if (!cancelled) {
+          setCustResults(data.customers || []);
+          setCustError(data.error || "");
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setCustResults([]);
+          setCustError(String(err?.message || err));
+        }
+      } finally {
+        if (!cancelled) setCustSearching(false);
+      }
+    }, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [custQuery, customer]);
+
   const updateForm = (key, value) => setForm((f) => ({ ...f, [key]: value }));
+
+  const clearCustomer = () => {
+    setCustomer(null);
+    setCustQuery("");
+    setCustResults([]);
+    setCustError("");
+  };
+
+  const selectCustomer = (c) => {
+    setCustomer(c);
+    setCustQuery("");
+    setCustResults([]);
+  };
 
   const startNew = () => {
     setForm(EMPTY_FORM);
     setSaveError("");
+    clearCustomer();
     if (boot.status === "ready" && boot.data.linked) {
       setPickedEmail(boot.data.salesperson.email);
     }
@@ -88,8 +142,12 @@ function Modal() {
       if (found) salesperson = { name: found.name, email: found.email };
     }
 
-    if (!form.customerName.trim() || !form.description.trim()) {
-      setSaveError("Customer name and description are required.");
+    if (!customer) {
+      setSaveError("Select a customer first.");
+      return;
+    }
+    if (!form.description.trim()) {
+      setSaveError("Description is required.");
       return;
     }
 
@@ -100,8 +158,9 @@ function Modal() {
         method: "POST",
         headers: await authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({
-          customerName: form.customerName,
-          customerEmail: form.customerEmail,
+          customerId: customer.id,
+          customerName: customer.name,
+          customerEmail: customer.email,
           salespersonName: salesperson.name,
           salespersonEmail: salesperson.email,
           budget: form.budget,
@@ -204,18 +263,45 @@ function Modal() {
     return (
       <s-page heading="New request">
         <s-stack direction="block" gap="base">
-          <s-text-field
-            label="Customer name"
-            value={form.customerName}
-            required
-            onInput={(e) => updateForm("customerName", e.currentTarget.value)}
-          />
-          <s-text-field
-            label="Customer email"
-            value={form.customerEmail}
-            placeholder="optional"
-            onInput={(e) => updateForm("customerEmail", e.currentTarget.value)}
-          />
+          {/* Customer picker — search the store's Shopify customers */}
+          {customer ? (
+            <s-section heading="Customer">
+              <s-stack direction="block" gap="small">
+                <s-text>{customer.name}</s-text>
+                {customer.email ? <s-text>{customer.email}</s-text> : null}
+                {customer.phone ? <s-text>{customer.phone}</s-text> : null}
+                <s-button variant="secondary" onClick={clearCustomer}>
+                  Change customer
+                </s-button>
+              </s-stack>
+            </s-section>
+          ) : (
+            <s-section heading="Customer">
+              <s-stack direction="block" gap="small">
+                <s-text-field
+                  label="Search by name, email, or phone"
+                  value={custQuery}
+                  placeholder="e.g. Jane, jane@email.com, or 555-1234"
+                  onInput={(e) => setCustQuery(e.currentTarget.value)}
+                />
+                {custSearching ? <s-text>Searching…</s-text> : null}
+                {custError ? <s-text tone="critical">{custError}</s-text> : null}
+                {custResults.map((c) => (
+                  <s-button variant="secondary" onClick={() => selectCustomer(c)}>
+                    {c.name}
+                    {c.email ? ` · ${c.email}` : ""}
+                    {c.phone ? ` · ${c.phone}` : ""}
+                  </s-button>
+                ))}
+                {!custSearching &&
+                !custError &&
+                custQuery.trim().length >= 2 &&
+                custResults.length === 0 ? (
+                  <s-text>No customers found.</s-text>
+                ) : null}
+              </s-stack>
+            </s-section>
+          )}
 
           {isAdmin && roster.length > 0 && (
             <s-section heading="Salesperson">
@@ -225,10 +311,7 @@ function Modal() {
                 }
               >
                 {roster.map((s) => (
-                  <s-choice
-                    value={s.email}
-                    selected={s.email === pickedEmail}
-                  >
+                  <s-choice value={s.email} selected={s.email === pickedEmail}>
                     {s.name}
                     {s.email === me.email ? " (you)" : ""}
                   </s-choice>

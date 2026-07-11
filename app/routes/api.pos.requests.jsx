@@ -50,7 +50,7 @@ export const action = async ({ request }) => {
       shop,
       customerName,
       customerEmail: String(body.customerEmail || "").trim() || null,
-      customerId: null,
+      customerId: String(body.customerId || "").trim() || null,
       salespersonName: salespersonName || salespersonEmail,
       salespersonEmail,
       description,
