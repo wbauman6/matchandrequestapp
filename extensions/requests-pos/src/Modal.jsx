@@ -36,6 +36,7 @@ function Modal() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [result, setResult] = useState(null); // { matchCount }
+  const [debug, setDebug] = useState(null); // TEMP diagnostic for submit bug
 
   useEffect(() => {
     let cancelled = false;
@@ -90,34 +91,39 @@ function Modal() {
       if (found) salesperson = { name: found.name, email: found.email };
     }
 
-    if (!form.customerName.trim() || !form.description.trim()) {
-      setSaveError("Customer name and description are required.");
-      return;
-    }
+    // TEMP diagnostic: build payload from current state and send it REGARDLESS
+    // of validation, so we can see exactly what state the form holds and what the
+    // backend receives. (Client validation intentionally bypassed for diagnosis.)
+    const payload = {
+      customerName: form.customerName,
+      customerEmail: form.customerEmail,
+      salespersonName: salesperson.name,
+      salespersonEmail: salesperson.email,
+      budget: form.budget,
+      description: form.description,
+    };
 
     setSaving(true);
     setSaveError("");
+    setDebug({ formSnapshot: { ...form }, sent: payload, received: null });
     try {
       const res = await fetch("/api/pos/requests", {
         method: "POST",
         headers: await authHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify({
-          customerName: form.customerName,
-          customerEmail: form.customerEmail,
-          salespersonName: salesperson.name,
-          salespersonEmail: salesperson.email,
-          budget: form.budget,
-          description: form.description,
-        }),
+        body: JSON.stringify(payload),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok || data.error) {
-        throw new Error(data.error || `Server returned ${res.status}`);
-      }
-      setResult({ matchCount: data.matchCount ?? 0 });
-      setView("saved");
+      setDebug((d) => ({
+        ...d,
+        received: data.received ?? null,
+        status: res.status,
+        serverError: data.error ?? null,
+        matchCount: data.matchCount ?? null,
+      }));
+      setView("debug");
     } catch (err) {
-      setSaveError(String(err?.message || err));
+      setDebug((d) => ({ ...d, fetchError: String(err?.message || err) }));
+      setView("debug");
     } finally {
       setSaving(false);
     }
@@ -174,6 +180,35 @@ function Modal() {
   const me = data.salesperson;
   const isAdmin = me.role === "admin";
   const roster = data.salespeople || [];
+
+  // ---- TEMP diagnostic view ----
+  if (view === "debug") {
+    return (
+      <s-page heading="Submit diagnostic">
+        <s-stack direction="block" gap="base">
+          <s-section heading="Form state at submit">
+            <s-text>{JSON.stringify(debug?.formSnapshot ?? {})}</s-text>
+          </s-section>
+          <s-section heading="Payload sent">
+            <s-text>{JSON.stringify(debug?.sent ?? {})}</s-text>
+          </s-section>
+          <s-section heading="Backend received">
+            <s-text>{JSON.stringify(debug?.received ?? debug?.fetchError ?? "no response")}</s-text>
+          </s-section>
+          <s-section heading="Result">
+            <s-text>
+              status={String(debug?.status ?? "—")} matchCount=
+              {String(debug?.matchCount ?? "—")} error=
+              {String(debug?.serverError ?? "none")}
+            </s-text>
+          </s-section>
+          <s-button variant="secondary" onClick={() => setView("create")}>
+            Back to form
+          </s-button>
+        </s-stack>
+      </s-page>
+    );
+  }
 
   // ---- Saved confirmation ----
   if (view === "saved") {
@@ -263,6 +298,10 @@ function Modal() {
           />
 
           {saveError ? <s-text tone="critical">{saveError}</s-text> : null}
+
+          <s-section heading="Live form state (diagnostic)">
+            <s-text>{JSON.stringify(form)}</s-text>
+          </s-section>
 
           <s-stack direction="inline" gap="base">
             <s-button variant="primary" loading={saving} onClick={submit}>
