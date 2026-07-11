@@ -41,6 +41,13 @@ async function resolveIdentity(request) {
   );
 
   if (salesperson) {
+    // Admins can create a request on behalf of another salesperson, so include
+    // the active roster for the picker. (Cheap; only used by the create form.)
+    const salespeople = await prisma.salesperson.findMany({
+      where: { shop, active: true },
+      orderBy: { name: "asc" },
+      select: { name: true, email: true, role: true },
+    });
     return cors(
       Response.json({
         linked: true,
@@ -52,6 +59,7 @@ async function resolveIdentity(request) {
           role: salesperson.role,
           active: salesperson.active,
         },
+        salespeople,
       }),
     );
   }
