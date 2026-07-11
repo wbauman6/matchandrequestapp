@@ -30,7 +30,9 @@ function Modal() {
   const [view, setView] = useState("home");
 
   const [form, setForm] = useState(EMPTY_FORM);
-  const [pickedEmail, setPickedEmail] = useState(null); // salesperson email for admins
+  // Salesperson defaults to the logged-in person; admins can optionally reassign.
+  const [pickedEmail, setPickedEmail] = useState(null);
+  const [assigning, setAssigning] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
 
@@ -124,6 +126,7 @@ function Modal() {
   const startNew = () => {
     setForm(EMPTY_FORM);
     setSaveError("");
+    setAssigning(false);
     clearCustomer();
     if (boot.status === "ready" && boot.data.linked) {
       setPickedEmail(boot.data.salesperson.email);
@@ -206,23 +209,25 @@ function Modal() {
   if (!data.linked) {
     return (
       <s-page heading="Match and Request">
-        <s-stack direction="block" gap="base">
-          <s-banner tone="warning" heading="You're not linked yet" />
-          <s-section heading="Ask an admin to link you">
-            <s-stack direction="block" gap="small">
-              <s-text>
-                Your POS account isn't connected to a salesperson profile yet, so
-                you won't see any requests.
-              </s-text>
-              <s-text>POS Staff ID: {String(staffMemberId ?? "unknown")}</s-text>
-              <s-text>User ID: {String(userId ?? "unknown")}</s-text>
-              <s-text>
-                An admin pastes the POS Staff ID into your profile under Settings
-                → Salespeople.
-              </s-text>
-            </s-stack>
-          </s-section>
-        </s-stack>
+        <s-scroll-box>
+          <s-stack direction="block" gap="base">
+            <s-banner tone="warning" heading="You're not linked yet" />
+            <s-section heading="Ask an admin to link you">
+              <s-stack direction="block" gap="small">
+                <s-text>
+                  Your POS account isn't connected to a salesperson profile yet,
+                  so you won't see any requests.
+                </s-text>
+                <s-text>POS Staff ID: {String(staffMemberId ?? "unknown")}</s-text>
+                <s-text>User ID: {String(userId ?? "unknown")}</s-text>
+                <s-text>
+                  An admin pastes the POS Staff ID into your profile under
+                  Settings → Salespeople.
+                </s-text>
+              </s-stack>
+            </s-section>
+          </s-stack>
+        </s-scroll-box>
       </s-page>
     );
   }
@@ -230,30 +235,36 @@ function Modal() {
   const me = data.salesperson;
   const isAdmin = me.role === "admin";
   const roster = data.salespeople || [];
+  const assignedName =
+    isAdmin && pickedEmail && pickedEmail !== me.email
+      ? roster.find((s) => s.email === pickedEmail)?.name || me.name
+      : me.name;
 
   // ---- Saved confirmation ----
   if (view === "saved") {
     return (
       <s-page heading="Request created">
-        <s-stack direction="block" gap="base">
-          <s-banner tone="success" heading="Request saved" />
-          <s-section heading="What happens next">
-            <s-text>
-              We're searching inventory for matches now. The salesperson is
-              emailed automatically on strong matches, and the request stays
-              active — new arrivals are matched as they come in. (Viewing matches
-              directly on POS is coming next.)
-            </s-text>
-          </s-section>
-          <s-stack direction="inline" gap="base">
-            <s-button variant="primary" onClick={startNew}>
-              New request
-            </s-button>
-            <s-button variant="secondary" onClick={() => setView("home")}>
-              Done
-            </s-button>
+        <s-scroll-box>
+          <s-stack direction="block" gap="base">
+            <s-banner tone="success" heading="Request saved" />
+            <s-section heading="What happens next">
+              <s-text>
+                We're searching inventory for matches now. The salesperson is
+                emailed automatically on strong matches, and the request stays
+                active — new arrivals are matched as they come in. (Viewing
+                matches directly on POS is coming next.)
+              </s-text>
+            </s-section>
+            <s-stack direction="block" gap="base">
+              <s-button variant="primary" onClick={startNew}>
+                New request
+              </s-button>
+              <s-button variant="secondary" onClick={() => setView("home")}>
+                Done
+              </s-button>
+            </s-stack>
           </s-stack>
-        </s-stack>
+        </s-scroll-box>
       </s-page>
     );
   }
@@ -262,94 +273,113 @@ function Modal() {
   if (view === "create") {
     return (
       <s-page heading="New request">
-        <s-stack direction="block" gap="base">
-          {/* Customer picker — search the store's Shopify customers */}
-          {customer ? (
-            <s-section heading="Customer">
-              <s-stack direction="block" gap="small">
-                <s-text>{customer.name}</s-text>
-                {customer.email ? <s-text>{customer.email}</s-text> : null}
-                {customer.phone ? <s-text>{customer.phone}</s-text> : null}
-                <s-button variant="secondary" onClick={clearCustomer}>
-                  Change customer
-                </s-button>
-              </s-stack>
-            </s-section>
-          ) : (
-            <s-section heading="Customer">
-              <s-stack direction="block" gap="small">
-                <s-text-field
-                  label="Search by name, email, or phone"
-                  value={custQuery}
-                  placeholder="e.g. Jane, jane@email.com, or 555-1234"
-                  onInput={(e) => setCustQuery(e.currentTarget.value)}
-                />
-                {custSearching ? <s-text>Searching…</s-text> : null}
-                {custError ? <s-text tone="critical">{custError}</s-text> : null}
-                {custResults.map((c) => (
-                  <s-button variant="secondary" onClick={() => selectCustomer(c)}>
-                    {c.name}
-                    {c.email ? ` · ${c.email}` : ""}
-                    {c.phone ? ` · ${c.phone}` : ""}
+        <s-scroll-box>
+          <s-stack direction="block" gap="base">
+            {/* Customer — searchable Shopify customer picker */}
+            {customer ? (
+              <s-section heading="Customer">
+                <s-stack direction="block" gap="small">
+                  <s-text>{customer.name}</s-text>
+                  {customer.email ? <s-text>{customer.email}</s-text> : null}
+                  {customer.phone ? <s-text>{customer.phone}</s-text> : null}
+                  <s-button variant="secondary" onClick={clearCustomer}>
+                    Change customer
                   </s-button>
-                ))}
-                {!custSearching &&
-                !custError &&
-                custQuery.trim().length >= 2 &&
-                custResults.length === 0 ? (
-                  <s-text>No customers found.</s-text>
-                ) : null}
-              </s-stack>
-            </s-section>
-          )}
+                </s-stack>
+              </s-section>
+            ) : (
+              <s-section heading="Customer">
+                <s-stack direction="block" gap="small">
+                  <s-text-field
+                    label="Search by name, email, or phone"
+                    value={custQuery}
+                    placeholder="Jane, jane@email.com, or 555-1234"
+                    onInput={(e) => setCustQuery(e.currentTarget.value)}
+                  />
+                  {custSearching ? <s-text>Searching…</s-text> : null}
+                  {custError ? <s-text tone="critical">{custError}</s-text> : null}
+                  {custResults.map((c) => (
+                    <s-button
+                      variant="secondary"
+                      onClick={() => selectCustomer(c)}
+                    >
+                      {c.name}
+                      {c.email ? ` · ${c.email}` : ""}
+                      {c.phone ? ` · ${c.phone}` : ""}
+                    </s-button>
+                  ))}
+                  {!custSearching &&
+                  !custError &&
+                  custQuery.trim().length >= 2 &&
+                  custResults.length === 0 ? (
+                    <s-text>No customers found.</s-text>
+                  ) : null}
+                </s-stack>
+              </s-section>
+            )}
 
-          {isAdmin && roster.length > 0 && (
-            <s-section heading="Salesperson">
-              <s-choice-list
-                onChange={(e) =>
-                  setPickedEmail(e.currentTarget.values?.[0] ?? me.email)
-                }
+            {/* Description (required) */}
+            <s-text-area
+              label="Description"
+              value={form.description}
+              rows={4}
+              required
+              details="What the customer is looking for, in plain English."
+              placeholder="e.g. grand seiko watch with a round dial"
+              onInput={(e) => updateForm("description", e.currentTarget.value)}
+            />
+
+            {/* Budget (optional) — below description */}
+            <s-text-field
+              label="Budget (optional)"
+              value={form.budget}
+              placeholder="2500"
+              onInput={(e) => updateForm("budget", e.currentTarget.value)}
+            />
+
+            {/* Salesperson auto-set to the logged-in person. Admins may reassign. */}
+            {isAdmin &&
+              roster.length > 0 &&
+              (assigning ? (
+                <s-section heading="Assign to salesperson">
+                  <s-choice-list
+                    onChange={(e) =>
+                      setPickedEmail(e.currentTarget.values?.[0] ?? me.email)
+                    }
+                  >
+                    {roster.map((s) => (
+                      <s-choice value={s.email} selected={s.email === pickedEmail}>
+                        {s.name}
+                        {s.email === me.email ? " (you)" : ""}
+                      </s-choice>
+                    ))}
+                  </s-choice-list>
+                </s-section>
+              ) : (
+                <s-stack direction="block" gap="small">
+                  <s-text>Salesperson: {assignedName}</s-text>
+                  <s-button variant="secondary" onClick={() => setAssigning(true)}>
+                    Assign to another salesperson
+                  </s-button>
+                </s-stack>
+              ))}
+
+            {saveError ? <s-text tone="critical">{saveError}</s-text> : null}
+
+            <s-stack direction="block" gap="base">
+              <s-button variant="primary" loading={saving} onClick={submit}>
+                Save & find matches
+              </s-button>
+              <s-button
+                variant="secondary"
+                disabled={saving}
+                onClick={() => setView("home")}
               >
-                {roster.map((s) => (
-                  <s-choice value={s.email} selected={s.email === pickedEmail}>
-                    {s.name}
-                    {s.email === me.email ? " (you)" : ""}
-                  </s-choice>
-                ))}
-              </s-choice-list>
-            </s-section>
-          )}
-
-          <s-text-field
-            label="Budget ($)"
-            value={form.budget}
-            placeholder="2500"
-            onInput={(e) => updateForm("budget", e.currentTarget.value)}
-          />
-          <s-text-area
-            label="Description"
-            value={form.description}
-            rows={4}
-            required
-            placeholder="Describe what the customer wants in plain English (e.g. 'grand seiko watch with a round dial' or 'yellow gold tennis bracelet under $3000')"
-            onInput={(e) => updateForm("description", e.currentTarget.value)}
-          />
-
-          {saveError ? <s-text tone="critical">{saveError}</s-text> : null}
-
-          <s-stack direction="inline" gap="base">
-            <s-button variant="primary" loading={saving} onClick={submit}>
-              Save & find matches
-            </s-button>
-            <s-button
-              variant="secondary"
-              disabled={saving}
-              onClick={() => setView("home")}
-            >
-              Cancel
-            </s-button>
+                Cancel
+              </s-button>
+            </s-stack>
           </s-stack>
-        </s-stack>
+        </s-scroll-box>
       </s-page>
     );
   }
