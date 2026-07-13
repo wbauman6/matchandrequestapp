@@ -10,7 +10,7 @@
  * Protected by CRON_SECRET (Vercel sends Authorization: Bearer <CRON_SECRET>).
  */
 import prisma from "../db.server.js";
-import { matchProductAgainstRequests } from "../lib/matchRunner.server.js";
+import { enqueueProduct, drainProductQueue } from "../lib/productQueue.server.js";
 
 const API_VERSION = "2025-10";
 const MAX_PER_RUN = 40; // bound cost/time; repeated daily runs catch up
@@ -39,7 +39,6 @@ export const loader = async ({ request }) => {
     );
 
     let processed = 0;
-    let matched = 0;
     let cursor = null;
     let hasNext = true;
     let stop = false;
@@ -68,12 +67,10 @@ export const loader = async ({ request }) => {
             image: node.featuredImage?.url || null,
             active: true,
           };
-          const n = await matchProductAgainstRequests(shop, product).catch((e) => {
-            console.error("[check-products] match failed:", e?.message || e);
-            return 0;
+          await enqueueProduct(shop, product).catch((e) => {
+            console.error("[check-products] enqueue failed:", e?.message || e);
           });
           processed++;
-          matched += n;
           if (processed >= MAX_PER_RUN) { stop = true; break; }
         }
         hasNext = page.pageInfo.hasNextPage;
@@ -83,7 +80,13 @@ export const loader = async ({ request }) => {
       results.push({ shop, error: err?.message || String(err) });
       continue;
     }
-    results.push({ shop, newProcessed: processed, matchesUpserted: matched });
+    // Drain the queue (covers both what we just enqueued and any backlog the
+    // webhook-triggered drains left behind, e.g. after an AI-budget abort).
+    const drained = await drainProductQueue(shop).catch((e) => {
+      console.error("[check-products] drain failed:", e?.message || e);
+      return { processed: 0, matched: 0, aborted: true };
+    });
+    results.push({ shop, newEnqueued: processed, drained });
   }
 
   return Response.json({ ok: true, timestamp: new Date().toISOString(), results });

@@ -1,25 +1,25 @@
 import prisma from "../db.server.js";
-import { cosineSimilarity } from "./matching.js";
 import {
   embedText,
   buildRequestText,
-  buildProductText,
-  textHash,
   hasEmbeddingKey,
 } from "./embeddings.server.js";
 import { reasonMatches, verifyBatch, confidenceToScore } from "./reasoningMatch.server.js";
-import { withinBudget, isOverBudget, budgetCeiling } from "./budget.js";
-import { sendMatchSummaryEmail, sendNewProductMatchEmail } from "./email.server.js";
+import { isOverBudget, budgetCeiling } from "./budget.js";
+import { bumpCounter } from "./aiBudget.server.js";
+import { sendMatchSummaryEmail } from "./email.server.js";
 
 // --- Tunables -------------------------------------------------------------
 const TOP_K = 50; // candidates sent to the AI reasoning pass
-const RETRIEVAL_GATE = 0.35; // webhook: min cosine for a new product to be judged for a request
 
 // Tiered budget tolerance (editable config lives in ./budget.js).
 
+// NOTE: the keep-watching webhook path no longer lives here. products/create|
+// update events are queued (instant 200 to Shopify) and processed in batches
+// by app/lib/productQueue.server.js — see drainProductQueue.
 
 // Embed (and lazily persist) a request's query vector from its description.
-async function getRequestEmbedding(request) {
+export async function getRequestEmbedding(request) {
   if (Array.isArray(request.embedding) && request.embedding.length) {
     return request.embedding;
   }
@@ -206,149 +206,26 @@ async function runMatchesInner(request, reqVec) {
       matches: notify,
       shop: request.shop,
     })
-      .then(() =>
-        prisma.request
-          .update({ where: { id: request.id }, data: { lastReminderAt: new Date() } })
-          .catch(() => {}),
-      )
+      .then(async () => {
+        // Send-record: a match is emailed at most once, ever.
+        const now = new Date();
+        await prisma.match
+          .updateMany({
+            where: { requestId: request.id, notifiedAt: null, needsReview: false, overBudget: false },
+            data: { notifiedAt: now },
+          })
+          .catch(() => {});
+        await prisma.request
+          .update({
+            where: { id: request.id },
+            data: { lastReminderAt: now, lastMatchEmailAt: now },
+          })
+          .catch(() => {});
+        await bumpCounter("match_emails").catch(() => {});
+      })
       .catch((err) => console.error("[email] summary send failed:", err));
   }
 
   return ops.length;
 }
 
-/**
- * Keep-watching: a product was created/updated. Embed + store it, then run it
- * against active requests (cosine gate → AI reasoning). New high-confidence
- * pairings email the salesperson; medium/low go to the review queue. Dedupes:
- * a request/product pair already evaluated is never re-alerted.
- */
-export async function matchProductAgainstRequests(shop, product) {
-  // Inactive/archived/deleted → remove its embedding and non-declined matches.
-  if (!product || product.active === false) {
-    await prisma.match.deleteMany({ where: { shop, productId: product.id, declined: false } });
-    await prisma.productEmbedding.deleteMany({ where: { productId: product.id } }).catch(() => {});
-    return 0;
-  }
-
-  if (!hasEmbeddingKey()) return 0;
-
-  // Embed + persist the product (skip re-embed when unchanged).
-  const text = buildProductText(product);
-  const hash = textHash(text);
-  const existingEmb = await prisma.productEmbedding.findUnique({
-    where: { productId: product.id },
-    select: { hash: true, embedding: true },
-  });
-  let prodVec = existingEmb && existingEmb.hash === hash ? existingEmb.embedding : null;
-  if (!prodVec) {
-    prodVec = await embedText(text, "document").catch(() => null);
-    if (prodVec) {
-      await prisma.productEmbedding
-        .upsert({
-          where: { productId: product.id },
-          update: { hash, embedding: prodVec, title: product.title, description: product.description, price: product.price, image: product.image },
-          create: { shop, productId: product.id, hash, embedding: prodVec, title: product.title, description: product.description, price: product.price, image: product.image },
-        })
-        .catch(() => {});
-    }
-  }
-  if (!prodVec) return 0;
-
-  const requests = await prisma.request.findMany({
-    where: { shop, status: { in: ["active", "pending", "in_review"] } },
-  });
-  const existing = await prisma.match.findMany({
-    where: { shop, productId: product.id },
-    select: { requestId: true },
-  });
-  const known = new Set(existing.map((m) => m.requestId)); // dedupe accepted
-  // Dedupe reasoned pairs (incl. rejected) so we never re-run the AI on an
-  // unchanged product for the same request.
-  const evals = await prisma.matchEval.findMany({
-    where: { shop, productId: product.id },
-    select: { requestId: true, productHash: true },
-  });
-  const evalHash = new Map(evals.map((e) => [e.requestId, e.productHash]));
-
-  const ops = [];
-  const evalOps = [];
-  const newHigh = [];
-  for (const request of requests) {
-    if (known.has(request.id)) continue; // already matched this product for this request
-    if (evalHash.get(request.id) === hash) continue; // already reasoned this exact product version
-    if (!withinBudget(request.budget, product.price)) continue;
-    const reqVec = await getRequestEmbedding(request);
-    if (!reqVec) continue;
-    if (cosineSimilarity(reqVec, prodVec) < RETRIEVAL_GATE) continue;
-
-    let matches;
-    try {
-      matches = await reasonMatches({
-        description: request.description || "",
-        budget: null, // budget is a soft ranking factor, never an AI gate
-        candidates: [{ productId: product.id, title: product.title, description: product.description, price: product.price }],
-      });
-    } catch (err) {
-      // Transient reasoning failure — skip WITHOUT recording a MatchEval so this
-      // pair is retried on the next webhook rather than being wrongly dedup'd.
-      console.error("[keep-watching] reasoning failed for request", request.id, err?.message || err);
-      continue;
-    }
-    let m = matches.find((x) => x.productId === product.id);
-    // Batched strict double-check on this single candidate.
-    if (m) {
-      const pass = await verifyBatch({
-        description: request.description || "",
-        candidates: [{ productId: product.id, title: product.title, description: product.description }],
-      });
-      if (!pass.has(product.id)) m = null;
-    }
-    // Record that this (request, product-version) pair was reasoned — even a
-    // reject — so future webhooks skip it until the product changes.
-    evalOps.push(
-      prisma.matchEval.upsert({
-        where: { requestId_productId: { requestId: request.id, productId: product.id } },
-        update: { productHash: hash, matched: !!m },
-        create: { shop, requestId: request.id, productId: product.id, productHash: hash, matched: !!m },
-      }).catch(() => {}),
-    );
-    if (!m) continue;
-
-    const overBudget = isOverBudget(request.budget, product.price);
-    const needsReview = m.confidence !== "high";
-    ops.push(
-      upsertMatch(shop, request, { productId: product.id, title: product.title, price: product.price, image: product.image }, {
-        score: confidenceToScore(m.confidence),
-        confidence: m.confidence,
-        reason: m.reason,
-        needsReview,
-        overBudget,
-      }),
-    );
-    if (!needsReview && !overBudget) newHigh.push({ request, m });
-  }
-  await Promise.all(ops);
-
-  if (process.env.RESEND_API_KEY) {
-    for (const { request, m } of newHigh) {
-      sendNewProductMatchEmail({
-        salespersonName: request.salespersonName,
-        salespersonEmail: request.salespersonEmail,
-        customerName: request.customerName,
-        budget: request.budget,
-        match: {
-          productTitle: product.title,
-          productPrice: product.price,
-          productImage: product.image,
-          score: confidenceToScore(m.confidence),
-          matchedKeywords: [],
-          reason: m.reason,
-        },
-        shop,
-      }).catch((err) => console.error("[email] new-product alert failed:", err));
-    }
-  }
-
-  return ops.length;
-}

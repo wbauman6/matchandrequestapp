@@ -58,6 +58,9 @@ model Request {
   matchState       String?
   matchError       String?
   matchedAt        DateTime?
+  // Digest throttle: last time this request was emailed about new matches.
+  // Keep-watching sends at most one digest per request per EMAIL_MIN_INTERVAL.
+  lastMatchEmailAt DateTime?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
   matches          Match[]
@@ -84,6 +87,9 @@ model Match {
   reasoning       String?
   confidence      String?
   overBudget      Boolean  @default(false)
+  // Send-record: set when this match was included in an alert/digest email.
+  // A match is emailed AT MOST once, ever (fixes the duplicate-email storm).
+  notifiedAt      DateTime?
   confirmedAt     DateTime?
   createdAt       DateTime @default(now())
   request         Request  @relation(fields: [requestId], references: [id], onDelete: Cascade)
@@ -141,6 +147,44 @@ model MatchEval {
 
   @@unique([requestId, productId])
   @@index([shop, productId])
+}
+
+// Instant-ack webhook queue: products/create|update handlers upsert a row here
+// and return 200 immediately (Shopify never times out / retries). A single
+// leased drain worker (webhook waitUntil + cron) processes the queue in BATCHED
+// AI calls. One row per (shop, product) — a newer event replaces the payload.
+model ProductQueue {
+  id        String    @id @default(cuid())
+  shop      String
+  productId String
+  payload   Json // shaped product object (title, description, price, image, active…)
+  attempts  Int       @default(0)
+  status    String    @default("queued") // queued | failed (gave up after MAX_ATTEMPTS)
+  claimedAt DateTime? // lease: claims older than 3 min are reclaimable
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@unique([shop, productId])
+  @@index([shop, status])
+}
+
+// Per-shop mutex so at most ONE drain worker runs at a time (bounded AI
+// concurrency). Lease-based: expired `until` means the lock is free.
+model DrainLock {
+  shop  String   @id
+  until DateTime @default(now())
+}
+
+// Daily counters for the cost kill switch: "anthropic_calls" hard-stops
+// matching past ANTHROPIC_DAILY_CALL_LIMIT; "match_emails" caps outbound
+// match-alert emails per day.
+model DailyCounter {
+  id    String   @id @default(cuid())
+  day   DateTime @db.Date
+  key   String
+  count Int      @default(0)
+
+  @@unique([day, key])
 }
 
 model ProductEmbedding {

@@ -12,7 +12,12 @@ const SALES_EMAIL = "wbauman6@gmail.com";
 const RETRIEVAL_GATE = 0.35;
 const { Client } = pkg;
 const db = new Client({ connectionString: process.env.POSTGRES_URL_NON_POOLING });
-await db.connect();
+try {
+  await db.connect();
+} catch (err) {
+  console.log("SKIP: database unreachable from this network (" + (err?.code || err?.message) + ")");
+  process.exit(0);
+}
 
 // 1) Create a temp ACTIVE saved request (as if a salesperson saved it earlier).
 const reqId = "test_kw_" + crypto.randomUUID();
@@ -45,11 +50,22 @@ console.log(`\nStep: cosine(request, new product) = ${sim.toFixed(3)} (gate ${RE
 let created = false;
 if (sim >= RETRIEVAL_GATE) {
   // 4) AI reasoning
-  const matches = await reasonMatches({
-    description: request.description,
-    budget: request.budget,
-    candidates: [{ productId: product.id, title: product.title, description: product.description, price: product.price }],
-  });
+  let matches;
+  try {
+    matches = await reasonMatches({
+      description: request.description,
+      budget: request.budget,
+      candidates: [{ productId: product.id, title: product.title, description: product.description, price: product.price }],
+    });
+  } catch (err) {
+    if (err?.status === 400 || err?.status === 401 || err?.status === 403 || err?.budgetExceeded) {
+      console.log("SKIP: Anthropic unavailable (" + (err?.status || "budget") + ") — cannot live-test reasoning");
+      await db.query('DELETE FROM "Request" WHERE id=$1', [reqId]);
+      await db.end();
+      process.exit(0);
+    }
+    throw err;
+  }
   const m = matches.find((x) => x.productId === product.id);
   console.log("Step: AI reasoning ->", m ? `${m.confidence.toUpperCase()}: ${m.reason}` : "no match");
 

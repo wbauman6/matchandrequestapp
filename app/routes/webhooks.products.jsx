@@ -1,11 +1,16 @@
+import { waitUntil } from "@vercel/functions";
 import { authenticate } from "../shopify.server";
-import { matchProductAgainstRequests } from "../lib/matchRunner.server";
+import { enqueueProduct, drainProductQueue } from "../lib/productQueue.server";
 
 /**
  * Handles products/create and products/update webhooks.
- * Whenever a product is added or changed in Shopify, re-evaluate it
- * against every open customer request so new estate inventory
- * automatically flags matches without anyone clicking anything.
+ *
+ * INSTANT-ACK: the handler only upserts the event into ProductQueue (fast DB
+ * write) and returns 200 within Shopify's 5-second deadline — so Shopify never
+ * marks deliveries failed and never retries (the July 13 runaway was a bulk
+ * sync × synchronous AI matching × Shopify retry storm). The queued products
+ * are then processed in BATCHED AI calls by drainProductQueue, kicked here via
+ * waitUntil and backed up by the drain cron.
  */
 export const action = async ({ request }) => {
   const { shop, topic, payload } = await authenticate.webhook(request);
@@ -63,10 +68,20 @@ export const action = async ({ request }) => {
   };
 
   try {
-    const count = await matchProductAgainstRequests(shop, product);
-    console.log(`[${topic}] ${shop} → ${product.title}: ${count} match(es) upserted`);
+    await enqueueProduct(shop, product);
   } catch (err) {
-    console.error(`[${topic}] match failed for ${product.id}:`, err);
+    console.error(`[${topic}] enqueue failed for ${product.id}:`, err);
+  }
+
+  // Kick a drain attempt in the background (no-op if another worker holds the
+  // per-shop lease). The response goes out immediately.
+  const work = drainProductQueue(shop).catch((err) =>
+    console.error(`[${topic}] drain failed:`, err?.message || err),
+  );
+  try {
+    waitUntil(work);
+  } catch {
+    void work; // non-Vercel runtime: detached
   }
 
   return new Response();

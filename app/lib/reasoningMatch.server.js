@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { metalToneRules } from "./metalTone.js";
+import { trackAiCall, AiBudgetExceededError } from "./aiBudget.server.js";
 
 let client = null;
 function getClient() {
@@ -12,10 +13,23 @@ function getClient() {
 
 const MODEL = "claude-sonnet-4-6";
 
+// Is this error worth retrying? Only transient conditions: rate limits,
+// overload/5xx, timeouts, network drops, and unparseable/truncated model
+// output. Permanent failures (bad key, out of credits, bad request) and the
+// daily budget kill switch fail IMMEDIATELY — retrying them just multiplies
+// calls (the July 13 runaway retried out-of-credit 400s 3× each).
+function isRetryable(err) {
+  if (err instanceof AiBudgetExceededError || err?.budgetExceeded) return false;
+  const status = err?.status;
+  if (status == null) return true; // network error or our parse-failure Error
+  if (status === 429 || status === 408 || status >= 500) return true; // incl. 529 overloaded
+  return false; // 400/401/403/404… — permanent, don't retry
+}
+
 // Retry a flaky async op (transient API error, overload, or an unparseable /
-// truncated model response) with exponential backoff + jitter. Throws the last
-// error if every attempt fails, so callers can distinguish "failed" from a
-// genuine empty result.
+// truncated model response) with exponential backoff + jitter. Non-retryable
+// errors are rethrown immediately. Throws the last error if every attempt
+// fails, so callers can distinguish "failed" from a genuine empty result.
 async function withRetry(fn, { tries = 3, base = 600, label = "op" } = {}) {
   let lastErr;
   for (let i = 0; i < tries; i++) {
@@ -23,6 +37,7 @@ async function withRetry(fn, { tries = 3, base = 600, label = "op" } = {}) {
       return await fn();
     } catch (err) {
       lastErr = err;
+      if (!isRetryable(err)) throw err;
       if (i < tries - 1) {
         const delay = base * 2 ** i + Math.floor(Math.random() * base);
         console.warn(`[${label}] attempt ${i + 1}/${tries} failed (${err?.message || err}); retrying in ${delay}ms`);
@@ -107,6 +122,7 @@ Return the JSON verdict now.`;
 
   const parsed = await withRetry(
     async () => {
+      await trackAiCall(); // daily cost kill switch — throws when over budget
       const resp = await c.messages.create({
         model: MODEL,
         max_tokens: 8000,
@@ -171,6 +187,7 @@ Return a verdict for every product id. Return the JSON now.`;
   try {
     const parsed = await withRetry(
       async () => {
+        await trackAiCall(); // daily cost kill switch — throws when over budget
         const resp = await c.messages.create({
           model: VERIFY_MODEL,
           max_tokens: 4000,
@@ -194,6 +211,8 @@ Return a verdict for every product id. Return the JSON now.`;
     for (const id of allIds) if (!parsed.results.some((x) => x.product_id === id)) pass.add(id);
     return pass;
   } catch (err) {
+    // Budget kill switch must HARD-STOP the caller, never fail open into more work.
+    if (err instanceof AiBudgetExceededError || err?.budgetExceeded) throw err;
     console.error("verifyBatch error:", err?.message || err);
     return allIds;
   }
