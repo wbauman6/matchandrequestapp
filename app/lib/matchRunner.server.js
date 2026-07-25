@@ -4,13 +4,13 @@ import {
   buildRequestText,
   hasEmbeddingKey,
 } from "./embeddings.server.js";
+import { expandAbbreviations } from "./requestClean.js";
 import { reasonMatches, verifyBatch, confidenceToScore } from "./reasoningMatch.server.js";
 import { isOverBudget, budgetCeiling } from "./budget.js";
+import { applyDynamicCap, RETRIEVAL_CEILING } from "./retrievalConfig.js";
 
-// --- Tunables -------------------------------------------------------------
-const TOP_K = 50; // candidates sent to the AI reasoning pass
-
-// Tiered budget tolerance (editable config lives in ./budget.js).
+// Retrieval candidate count is DYNAMIC — see ./retrievalConfig.js (similarity
+// threshold + floor + ceiling). Tiered budget tolerance lives in ./budget.js.
 
 // NOTE: the keep-watching webhook path no longer lives here. products/create|
 // update events are queued (instant 200 to Shopify) and processed in batches
@@ -110,13 +110,16 @@ async function runMatchesInner(request, reqVec) {
   });
   const declinedIds = new Set(declined.map((m) => m.productId));
 
-  // Steps 1+2 — semantic retrieval + budget filter run INSIDE Postgres via
-  // pgvector, returning only the top-K rows. This avoids shipping the entire
-  // embedding table (~43 MB) out of Neon on every request.
+  // Steps 1+2 — HARD FILTER the full catalog (in-stock only + budget), order by
+  // cosine similarity, and fetch the top CEILING rows INSIDE Postgres via
+  // pgvector. Filtering happens before any cap, so the cap only ever applies to
+  // relevant, in-stock, in-budget items (never wasted on junk). This also avoids
+  // shipping the whole embedding table (~43 MB) out of Neon per request.
   const ceiling = request.budget ? budgetCeiling(request.budget) : null;
   const vecLiteral = `[${reqVec.join(",")}]`;
   const rows = await prisma.$queryRawUnsafe(
-    `SELECT "productId", title, description, price, image
+    `SELECT "productId", title, description, price, image,
+            1 - (vec <=> $2::vector) AS sim
        FROM "ProductEmbedding"
       WHERE shop = $1 AND vec IS NOT NULL
         AND "inStock" = true
@@ -126,11 +129,16 @@ async function runMatchesInner(request, reqVec) {
     request.shop,
     vecLiteral,
     ceiling,
-    TOP_K + declinedIds.size,
+    RETRIEVAL_CEILING + declinedIds.size,
   );
-  const pool = rows.filter((r) => !declinedIds.has(r.productId)).slice(0, TOP_K);
+  // DYNAMIC CAP: keep everything above the similarity threshold, but at least
+  // FLOOR and at most CEILING (see retrievalConfig.js). Narrow queries → a small
+  // tight set; broad queries → many, up to the ceiling.
+  const pool = applyDynamicCap(rows.filter((r) => !declinedIds.has(r.productId)));
 
-  // Step 3 — AI reasoning pass.
+  // Step 3 — AI reasoning pass. Jeweler shorthand in the request (DIA, WG, …) is
+  // expanded so the AI gates on the same full words the embedding was built from.
+  const reasoningText = expandAbbreviations(request.description || "");
   const candidates = pool.map((p) => ({
     productId: p.productId,
     title: p.title,
@@ -140,7 +148,7 @@ async function runMatchesInner(request, reqVec) {
   // Reasoning pass proposes matches (1 Sonnet call). Budget is NOT passed — it's
   // a soft ranking factor handled here, never an AI gate.
   let matches = await reasonMatches({
-    description: request.description || "",
+    description: reasoningText,
     budget: null,
     candidates,
   });
@@ -150,7 +158,7 @@ async function runMatchesInner(request, reqVec) {
   if (matches.length > 0) {
     const cById = new Map(candidates.map((c) => [c.productId, c]));
     const pass = await verifyBatch({
-      description: request.description || "",
+      description: reasoningText,
       candidates: matches.map((m) => cById.get(m.productId)).filter(Boolean),
     });
     matches = matches.filter((m) => pass.has(m.productId));

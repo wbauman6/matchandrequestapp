@@ -8,6 +8,7 @@ import {
 } from "./embeddings.server.js";
 import { reasonMatches, verifyBatch, confidenceToScore } from "./reasoningMatch.server.js";
 import { getRequestEmbedding } from "./matchRunner.server.js";
+import { expandAbbreviations } from "./requestClean.js";
 import { withinBudget, isOverBudget } from "./budget.js";
 import { isDropWindow } from "./dropSchedule.js";
 
@@ -299,19 +300,20 @@ export async function drainProductQueue(shop, { force = false } = {}) {
           candidates.push({ productId: product.id, title: product.title, description: product.description, price: product.price, _rowId: row.id, _hash: info.hash, _image: product.image });
         }
 
+        const reasoningText = expandAbbreviations(request.description || "");
         for (let i = 0; i < candidates.length; i += CHUNK) {
           const chunk = candidates.slice(i, i + CHUNK);
           let matches;
           try {
             matches = await reasonMatches({
-              description: request.description || "",
+              description: reasoningText,
               budget: null, // budget is a soft ranking factor, never an AI gate
               candidates: chunk,
             });
             if (matches.length > 0) {
               const cById = new Map(chunk.map((c) => [c.productId, c]));
               const pass = await verifyBatch({
-                description: request.description || "",
+                description: reasoningText,
                 candidates: matches.map((m) => cById.get(m.productId)).filter(Boolean),
               });
               matches = matches.filter((m) => pass.has(m.productId));

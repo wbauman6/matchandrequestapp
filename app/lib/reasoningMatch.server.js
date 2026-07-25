@@ -108,7 +108,11 @@ export async function reasonMatches({ description, budget, candidates }) {
   const list = candidates.map((p) => ({
     product_id: p.productId,
     title: p.title || "",
-    description: (p.description || "").slice(0, 1200),
+    // Full description — no truncation. Estate listings bury the spec table
+    // (Brand, metal, dial color, stone) at the END of a long description; a cap
+    // hid it (e.g. "Brand:Grand Seiko" at char ~2300 on the Omiwatari), making
+    // the AI gate on the misleading title alone.
+    description: p.description || "",
     price: p.price ?? null,
   }));
 
@@ -176,7 +180,7 @@ export async function verifyBatch({ description, candidates }) {
   const list = candidates.map((p) => ({
     product_id: p.productId,
     title: p.title || "",
-    description: (p.description || "").slice(0, 900),
+    description: p.description || "", // full description — see reasonMatches note
   }));
   const user = `Customer request: "${description}"
 
@@ -190,7 +194,7 @@ Return a verdict for every product id. Return the JSON now.`;
         await trackAiCall(); // daily cost kill switch — throws when over budget
         const resp = await c.messages.create({
           model: VERIFY_MODEL,
-          max_tokens: 4000,
+          max_tokens: 8000, // room for a verdict per candidate up to the retrieval ceiling
           system: BATCH_VERIFY_SYSTEM,
           messages: [{ role: "user", content: user }],
         });
