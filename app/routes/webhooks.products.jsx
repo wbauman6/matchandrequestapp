@@ -39,15 +39,17 @@ export const action = async ({ request }) => {
     return sum + (Number.isFinite(q) ? q : 0);
   }, 0);
 
-  // Available-inventory rule: sold items stay in the catalog at 0 available and
-  // must never match. inventory_quantity is the AVAILABLE quantity summed
-  // across locations. A variant with inventory_management unset is untracked —
-  // always purchasable — so a product with no tracked variants counts as in
-  // stock; otherwise it's in stock only if tracked availability > 0.
+  // Available-inventory FAST-PATH: sold items stay in the catalog at 0
+  // available and must never match. The webhook payload only proves "sold"
+  // when it actually carries tracked-variant inventory data (these fields can
+  // be absent without the read_inventory scope — absence must NOT read as
+  // in-stock). inStock === false triggers immediate match removal in
+  // enqueueProduct; undefined defers to the drain worker, which bulk-fetches
+  // authoritative availability from the Admin API per claim batch.
   const trackedVariants = (payload.variants || []).filter((v) => v?.inventory_management);
   const inStock =
     trackedVariants.length === 0
-      ? true
+      ? undefined
       : trackedVariants.reduce((sum, v) => {
           const q = Number(v?.inventory_quantity);
           return sum + (Number.isFinite(q) ? q : 0);

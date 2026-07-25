@@ -29,22 +29,18 @@ const TIME_BUDGET_MS = 90_000; // leave headroom under the 120s function cap
 export async function enqueueProduct(shop, product) {
   if (!product?.id) return;
   if (product.active === false) {
-    await prisma.match.deleteMany({ where: { shop, productId: product.id, declined: false } });
-    await prisma.productEmbedding.deleteMany({ where: { productId: product.id } }).catch(() => {});
-    // Clear reasoned-pair records so a reactivated product is re-judged.
-    await prisma.matchEval.deleteMany({ where: { shop, productId: product.id } }).catch(() => {});
+    await removeFromMatching(shop, product.id, { gone: true });
     await prisma.productQueue.deleteMany({ where: { shop, productId: product.id } }).catch(() => {});
     return;
   }
   if (product.inStock === false) {
-    // SOLD: drop its matches everywhere (app, POS, digest all read the Match
-    // table), flag the embedding so retrieval skips it, clear MatchEval so a
-    // restock re-matches, and skip AI work entirely.
-    await prisma.match.deleteMany({ where: { shop, productId: product.id, declined: false } });
-    await prisma.productEmbedding
-      .updateMany({ where: { shop, productId: product.id }, data: { inStock: false } })
-      .catch(() => {});
-    await prisma.matchEval.deleteMany({ where: { shop, productId: product.id } }).catch(() => {});
+    // SOLD (payload carried tracked inventory showing 0 available): drop its
+    // matches everywhere (app, POS, digest all read the Match table), flag the
+    // embedding so retrieval skips it, clear MatchEval so a restock
+    // re-matches, and skip AI work entirely. Payloads WITHOUT inventory data
+    // (inStock undefined) enqueue normally — the drain worker verifies
+    // availability against the Admin API before matching.
+    await removeFromMatching(shop, product.id, { gone: false });
     await prisma.productQueue.deleteMany({ where: { shop, productId: product.id } }).catch(() => {});
     return;
   }
@@ -98,10 +94,66 @@ async function claimBatch(shop) {
   );
 }
 
+// AUTHORITATIVE availability for a batch of products, in ONE Admin API call.
+// Webhook payloads can omit variant inventory fields (scope-dependent), so the
+// drain never trusts them: it asks Shopify directly. Returns Map(productId →
+// { active, inStock }) — deleted products come back { active: false }. Returns
+// null when no working offline token is available (caller falls back to
+// treating queued items as in stock; the daily backfill/cron self-corrects).
+async function fetchAvailability(shop, productIds) {
+  try {
+    const sessions = await prisma.session.findMany({ where: { shop, isOnline: false } });
+    let data = null;
+    for (const sess of sessions) {
+      const res = await fetch(`https://${shop}/admin/api/2025-10/graphql.json`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Shopify-Access-Token": sess.accessToken },
+        body: JSON.stringify({
+          query: `query($ids:[ID!]!){ nodes(ids:$ids){ ... on Product { id status totalInventory tracksInventory } } }`,
+          variables: { ids: productIds },
+        }),
+      });
+      const json = await res.json();
+      if (json.data?.nodes) { data = json.data.nodes; break; }
+    }
+    if (!data) return null;
+    const map = new Map();
+    for (const n of data) {
+      if (!n?.id) continue;
+      map.set(n.id, {
+        active: n.status === "ACTIVE",
+        inStock: !n.tracksInventory || (n.totalInventory ?? 0) > 0,
+      });
+    }
+    // Ids Shopify returned nothing for = deleted products.
+    for (const id of productIds) if (!map.has(id)) map.set(id, { active: false, inStock: false });
+    return map;
+  } catch (err) {
+    console.error("[drain] availability fetch failed:", err?.message || err);
+    return null;
+  }
+}
+
+// Cleanup for a product that is archived/deleted (gone=true) or sold: drop its
+// non-declined matches and reasoned-pair records; gone also drops the
+// embedding, sold just flags it out-of-stock (kept for restocks).
+async function removeFromMatching(shop, productId, { gone }) {
+  await prisma.match.deleteMany({ where: { shop, productId, declined: false } });
+  await prisma.matchEval.deleteMany({ where: { shop, productId } }).catch(() => {});
+  if (gone) {
+    await prisma.productEmbedding.deleteMany({ where: { productId } }).catch(() => {});
+  } else {
+    await prisma.productEmbedding
+      .updateMany({ where: { shop, productId }, data: { inStock: false } })
+      .catch(() => {});
+  }
+}
+
 // Ensure a queued product has a stored embedding (re-embed only when its text
-// hash changed). Only in-stock products reach the queue (enqueueProduct filters
-// sold ones), so this also flips inStock back on — covering restocks whose text
-// didn't change. Returns the vector or null on failure.
+// hash changed). Only in-stock products reach this point (enqueueProduct plus
+// the drain's authoritative availability check filter sold ones), so this also
+// flips inStock back on — covering restocks whose text didn't change. Returns
+// the vector or null on failure.
 async function ensureProductEmbedding(shop, product) {
   const text = buildProductText(product);
   const hash = textHash(text);
@@ -155,7 +207,27 @@ export async function drainProductQueue(shop) {
       // is cheap and nothing is silently lost.
       let interrupted = false;
 
-      const items = claimed.map((row) => ({ row, product: row.payload }));
+      // AUTHORITATIVE availability gate: verify every claimed product against
+      // the Admin API (one bulk call). Archived/deleted/sold products are
+      // cleaned up and never reach embedding or AI. (If the token is stale and
+      // the fetch fails, proceed best-effort — the daily backfill corrects.)
+      const avail = await fetchAvailability(shop, claimed.map((r) => r.productId));
+      const excludedIds = new Set();
+      if (avail) {
+        for (const row of claimed) {
+          const a = avail.get(row.productId);
+          if (a && (!a.active || !a.inStock)) {
+            await removeFromMatching(shop, row.productId, { gone: !a.active });
+            excludedIds.add(row.id);
+          }
+        }
+        if (excludedIds.size) {
+          await prisma.productQueue.deleteMany({ where: { id: { in: [...excludedIds] } } });
+          stats.processed += excludedIds.size;
+        }
+      }
+
+      const items = claimed.filter((r) => !excludedIds.has(r.id)).map((row) => ({ row, product: row.payload }));
       const failedIds = new Set(); // queue row ids to retry later
 
       // 1) Embeddings (only re-embeds when the product text actually changed).
@@ -270,7 +342,10 @@ export async function drainProductQueue(shop) {
       if (interrupted) break; // leave the whole claim batch for the next drain
 
       // 4) Queue bookkeeping: done rows leave; failed rows retry (capped).
-      const doneIds = claimed.map((r) => r.id).filter((id) => !failedIds.has(id));
+      // (excludedIds were already deleted by the availability gate above.)
+      const doneIds = claimed
+        .map((r) => r.id)
+        .filter((id) => !failedIds.has(id) && !excludedIds.has(id));
       if (doneIds.length) {
         await prisma.productQueue.deleteMany({ where: { id: { in: doneIds } } });
         stats.processed += doneIds.length;
