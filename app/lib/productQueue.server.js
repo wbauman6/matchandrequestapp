@@ -21,14 +21,30 @@ const TIME_BUDGET_MS = 90_000; // leave headroom under the 120s function cap
 
 /**
  * Instant-ack side of the webhook: upsert the product event and return. An
- * inactive/archived/deleted product cleans up instead of queueing. A newer
- * event for the same product replaces the queued payload (last-write-wins).
+ * inactive/archived/deleted product cleans up instead of queueing; a SOLD
+ * product (0 available inventory) removes its matches but keeps its embedding
+ * flagged out-of-stock so a restock can bring it straight back. A newer event
+ * for the same product replaces the queued payload (last-write-wins).
  */
 export async function enqueueProduct(shop, product) {
   if (!product?.id) return;
   if (product.active === false) {
     await prisma.match.deleteMany({ where: { shop, productId: product.id, declined: false } });
     await prisma.productEmbedding.deleteMany({ where: { productId: product.id } }).catch(() => {});
+    // Clear reasoned-pair records so a reactivated product is re-judged.
+    await prisma.matchEval.deleteMany({ where: { shop, productId: product.id } }).catch(() => {});
+    await prisma.productQueue.deleteMany({ where: { shop, productId: product.id } }).catch(() => {});
+    return;
+  }
+  if (product.inStock === false) {
+    // SOLD: drop its matches everywhere (app, POS, digest all read the Match
+    // table), flag the embedding so retrieval skips it, clear MatchEval so a
+    // restock re-matches, and skip AI work entirely.
+    await prisma.match.deleteMany({ where: { shop, productId: product.id, declined: false } });
+    await prisma.productEmbedding
+      .updateMany({ where: { shop, productId: product.id }, data: { inStock: false } })
+      .catch(() => {});
+    await prisma.matchEval.deleteMany({ where: { shop, productId: product.id } }).catch(() => {});
     await prisma.productQueue.deleteMany({ where: { shop, productId: product.id } }).catch(() => {});
     return;
   }
@@ -83,21 +99,30 @@ async function claimBatch(shop) {
 }
 
 // Ensure a queued product has a stored embedding (re-embed only when its text
-// hash changed). Returns the vector or null on failure.
+// hash changed). Only in-stock products reach the queue (enqueueProduct filters
+// sold ones), so this also flips inStock back on — covering restocks whose text
+// didn't change. Returns the vector or null on failure.
 async function ensureProductEmbedding(shop, product) {
   const text = buildProductText(product);
   const hash = textHash(text);
   const existing = await prisma.productEmbedding.findUnique({
     where: { productId: product.id },
-    select: { hash: true, embedding: true },
+    select: { hash: true, embedding: true, inStock: true },
   });
-  if (existing && existing.hash === hash) return { vec: existing.embedding, hash };
+  if (existing && existing.hash === hash) {
+    if (!existing.inStock) {
+      await prisma.productEmbedding
+        .updateMany({ where: { productId: product.id }, data: { inStock: true } })
+        .catch(() => {});
+    }
+    return { vec: existing.embedding, hash };
+  }
   const vec = await embedText(text, "document").catch(() => null);
   if (!vec) return null;
   await prisma.productEmbedding.upsert({
     where: { productId: product.id },
-    update: { hash, embedding: vec, title: product.title, description: product.description, price: product.price, image: product.image },
-    create: { shop, productId: product.id, hash, embedding: vec, title: product.title, description: product.description, price: product.price, image: product.image },
+    update: { hash, embedding: vec, title: product.title, description: product.description, price: product.price, image: product.image, inStock: true },
+    create: { shop, productId: product.id, hash, embedding: vec, title: product.title, description: product.description, price: product.price, image: product.image, inStock: true },
   });
   return { vec, hash };
 }

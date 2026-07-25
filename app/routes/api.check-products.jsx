@@ -29,7 +29,7 @@ export const loader = async ({ request }) => {
     const shop = session.shop;
     const token = session.accessToken;
     const endpoint = `https://${shop}/admin/api/${API_VERSION}/graphql.json`;
-    const QUERY = `query($cursor:String){ products(first:250, after:$cursor, query:"status:active"){ pageInfo{hasNextPage endCursor} edges{ node{ id title description tags priceRangeV2{minVariantPrice{amount}} featuredImage{url} } } } }`;
+    const QUERY = `query($cursor:String){ products(first:250, after:$cursor, query:"status:active"){ pageInfo{hasNextPage endCursor} edges{ node{ id title description tags totalInventory tracksInventory priceRangeV2{minVariantPrice{amount}} featuredImage{url} } } } }`;
 
     // Existing embeddings = products already processed.
     const embedded = new Set(
@@ -66,6 +66,9 @@ export const loader = async ({ request }) => {
             price: amount != null ? parseFloat(amount) : null,
             image: node.featuredImage?.url || null,
             active: true,
+            // Untracked inventory = always purchasable; tracked = needs
+            // available > 0. Sold (0-available) items never match.
+            inStock: !node.tracksInventory || (node.totalInventory ?? 0) > 0,
           };
           await enqueueProduct(shop, product).catch((e) => {
             console.error("[check-products] enqueue failed:", e?.message || e);

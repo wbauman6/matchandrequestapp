@@ -39,6 +39,20 @@ export const action = async ({ request }) => {
     return sum + (Number.isFinite(q) ? q : 0);
   }, 0);
 
+  // Available-inventory rule: sold items stay in the catalog at 0 available and
+  // must never match. inventory_quantity is the AVAILABLE quantity summed
+  // across locations. A variant with inventory_management unset is untracked —
+  // always purchasable — so a product with no tracked variants counts as in
+  // stock; otherwise it's in stock only if tracked availability > 0.
+  const trackedVariants = (payload.variants || []).filter((v) => v?.inventory_management);
+  const inStock =
+    trackedVariants.length === 0
+      ? true
+      : trackedVariants.reduce((sum, v) => {
+          const q = Number(v?.inventory_quantity);
+          return sum + (Number.isFinite(q) ? q : 0);
+        }, 0) > 0;
+
   // First image in the payload's image array (REST shape)
   const image =
     payload.image?.src ||
@@ -62,8 +76,8 @@ export const action = async ({ request }) => {
     tags,
     price,
     image,
-    // status:active = available (estate one-of-a-kind items are often qty 0).
     active: isActive,
+    inStock,
     totalInventory,
   };
 

@@ -119,6 +119,7 @@ async function runMatchesInner(request, reqVec) {
     `SELECT "productId", title, description, price, image
        FROM "ProductEmbedding"
       WHERE shop = $1 AND vec IS NOT NULL
+        AND "inStock" = true
         AND ($3::float8 IS NULL OR price IS NULL OR price <= $3::float8)
       ORDER BY vec <=> $2::vector
       LIMIT $4`,

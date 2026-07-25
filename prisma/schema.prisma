@@ -201,6 +201,12 @@ model ProductEmbedding {
   productType String?
   price       Float?
   image       String?
+  // Available-inventory gate: false when the product's tracked available
+  // quantity (summed across locations/variants) is 0 — i.e. SOLD. Sold items
+  // stay in the catalog (and keep their embedding for restocks) but are
+  // excluded from retrieval and matching, and their matches are removed.
+  // Untracked-inventory products count as in stock.
+  inStock     Boolean  @default(true)
   updatedAt   DateTime @updatedAt
 
   @@index([shop])
