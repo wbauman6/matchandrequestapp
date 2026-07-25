@@ -4,6 +4,10 @@ import { cleanRequestText } from "./requestClean.js";
 const VOYAGE_URL = "https://api.voyageai.com/v1/embeddings";
 const MODEL = "voyage-3";
 const MAX_BATCH = 100; // Voyage allows up to 128 inputs/request; stay conservative.
+// Not a content cap — voyage-3 accepts 32k tokens; this is a safety bound (~7.5k
+// tokens) so a pathological input can't error the API. Real descriptions top out
+// ~5.7k chars, so the FULL description is always embedded.
+const MAX_EMBED_CHARS = 30000;
 
 export function hasEmbeddingKey() {
   return Boolean(process.env.VOYAGE_API_KEY);
@@ -22,7 +26,7 @@ export function buildProductText(product) {
   return [title, title, title, product.description, tags]
     .filter(Boolean)
     .join(". ")
-    .slice(0, 8000);
+    .slice(0, MAX_EMBED_CHARS);
 }
 
 export function buildRequestText(request) {
@@ -30,7 +34,7 @@ export function buildRequestText(request) {
   // on the meaningful terms (brand, item type, attributes).
   const desc = cleanRequestText(request.description || "");
   const kws = (request.keywords || []).join(", ");
-  return [desc, kws].filter(Boolean).join(". ").slice(0, 8000);
+  return [desc, kws].filter(Boolean).join(". ").slice(0, MAX_EMBED_CHARS);
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

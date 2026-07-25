@@ -310,7 +310,7 @@ export async function verifySetting({ product, settings }) {
 
 Product:
 - Title: ${JSON.stringify(product.title || "")}
-- Description: ${JSON.stringify((product.description || "").slice(0, 1200))}
+- Description: ${JSON.stringify(product.description || "")}
 
 Does this product genuinely have ${settings.length > 1 ? "ALL of" : ""} the required setting(s) "${settings.join(", ")}"? Return the JSON now.`;
   try {
@@ -343,7 +343,7 @@ export async function verifyMatch({ description, product }) {
 
 Product:
 - Title: ${JSON.stringify(product.title || "")}
-- Description: ${JSON.stringify((product.description || "").slice(0, 1200))}
+- Description: ${JSON.stringify(product.description || "")}
 ${product.price != null ? `- Price: $${product.price}` : ""}
 
 Does this specific product genuinely satisfy this specific request? Return the JSON now.`;
