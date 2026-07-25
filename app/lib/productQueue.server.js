@@ -9,8 +9,6 @@ import {
 import { reasonMatches, verifyBatch, confidenceToScore } from "./reasoningMatch.server.js";
 import { getRequestEmbedding } from "./matchRunner.server.js";
 import { withinBudget, isOverBudget } from "./budget.js";
-import { bumpCounter, getCounter, EMAIL_DAILY_LIMIT } from "./aiBudget.server.js";
-import { sendMatchSummaryEmail } from "./email.server.js";
 
 // --- Tunables ---------------------------------------------------------------
 const RETRIEVAL_GATE = 0.35; // min cosine for a queued product to be judged for a request
@@ -20,7 +18,6 @@ const MAX_ATTEMPTS = 5; // give up on a queue row after this many failed drains
 const CLAIM_TTL_MIN = 3; // minutes before an abandoned claim is reclaimable
 const LEASE_MIN = 2; // drain-lock lease length in minutes
 const TIME_BUDGET_MS = 90_000; // leave headroom under the 120s function cap
-const EMAIL_MIN_INTERVAL_MS = 6 * 60 * 60 * 1000; // min gap between digests per request
 
 /**
  * Instant-ack side of the webhook: upsert the product event and return. An
@@ -107,8 +104,9 @@ async function ensureProductEmbedding(shop, product) {
 
 /**
  * Drain the product queue for a shop: claim → batch per request → ONE reasoning
- * call per ~40 candidates (+ one batched verify) → upsert matches + MatchEval →
- * one digest email per request (throttled). Runs under a per-shop lease so a
+ * call per ~40 candidates (+ one batched verify) → upsert matches + MatchEval.
+ * Sends NO email — new matches surface in-app/POS immediately and are announced
+ * by the scheduled digest (/api/digest) only. Runs under a per-shop lease so a
  * webhook flood never fans out concurrent AI work; a 3,700-product bulk sync
  * costs ~tens of AI calls per request instead of tens of thousands.
  *
@@ -121,7 +119,6 @@ export async function drainProductQueue(shop) {
   if (!(await acquireDrainLock(shop))) return stats; // another worker is on it
 
   const deadline = Date.now() + TIME_BUDGET_MS;
-  const emailedRequestIds = new Set();
   try {
     while (Date.now() < deadline) {
       const claimed = await claimBatch(shop);
@@ -237,7 +234,6 @@ export async function drainProductQueue(shop) {
                   create: { shop, requestId: request.id, productId: c.productId, productTitle: c.title, productPrice: c.price, productImage: c._image, score: confidenceToScore(m.confidence), confidence: m.confidence, reasoning: m.reason, needsReview, overBudget, matchedKeywords: [], declined: false },
                 }),
               );
-              emailedRequestIds.add(request.id);
             }
           }
           await Promise.all(dbOps);
@@ -269,56 +265,8 @@ export async function drainProductQueue(shop) {
           .catch(() => {});
       }
     }
-
-    // 5) Digest emails: at most ONE email per request per drain, throttled per
-    // request (6h) and per day globally; each match is emailed at most once.
-    await sendDigests(shop, emailedRequestIds);
   } finally {
     await releaseDrainLock(shop);
   }
   return stats;
-}
-
-// One digest per request listing its not-yet-notified, high-confidence,
-// in-budget matches. Replaces the old one-email-per-match firehose.
-async function sendDigests(shop, requestIds) {
-  if (!process.env.RESEND_API_KEY || requestIds.size === 0) return;
-  for (const requestId of requestIds) {
-    const request = await prisma.request.findUnique({ where: { id: requestId } });
-    if (!request) continue;
-    if (request.lastMatchEmailAt && Date.now() - request.lastMatchEmailAt.getTime() < EMAIL_MIN_INTERVAL_MS) {
-      continue; // throttled — matches still appear in-app; next digest picks them up
-    }
-    const unnotified = await prisma.match.findMany({
-      where: { requestId, shop, notifiedAt: null, needsReview: false, overBudget: false, declined: false },
-      orderBy: { score: "desc" },
-    });
-    if (unnotified.length === 0) continue;
-
-    const sentToday = await getCounter("match_emails").catch(() => 0);
-    if (sentToday >= EMAIL_DAILY_LIMIT) {
-      console.error(`[drain] daily email cap reached (${sentToday}/${EMAIL_DAILY_LIMIT}) — skipping digests`);
-      return;
-    }
-
-    try {
-      await sendMatchSummaryEmail({
-        salespersonName: request.salespersonName,
-        salespersonEmail: request.salespersonEmail,
-        customerName: request.customerName,
-        budget: request.budget,
-        matches: unnotified.map((m) => ({ productTitle: m.productTitle, productPrice: m.productPrice, productImage: m.productImage, score: m.score, matchedKeywords: [], reason: m.reasoning })),
-        shop,
-      });
-      const now = new Date();
-      await prisma.match.updateMany({
-        where: { id: { in: unnotified.map((m) => m.id) } },
-        data: { notifiedAt: now },
-      });
-      await prisma.request.update({ where: { id: requestId }, data: { lastMatchEmailAt: now } });
-      await bumpCounter("match_emails").catch(() => {});
-    } catch (err) {
-      console.error("[drain] digest email failed for request", requestId, err?.message || err);
-    }
-  }
 }

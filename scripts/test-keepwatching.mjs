@@ -5,7 +5,6 @@ import pkg from "pg";
 import { embedText, buildRequestText, buildProductText } from "../app/lib/embeddings.server.js";
 import { cosineSimilarity } from "../app/lib/matching.js";
 import { reasonMatches, confidenceToScore } from "../app/lib/reasoningMatch.server.js";
-import { sendNewProductMatchEmail } from "../app/lib/email.server.js";
 
 const SHOP = "walter-bauman-jewelers.myshopify.com";
 const SALES_EMAIL = "wbauman6@gmail.com";
@@ -83,20 +82,9 @@ if (sim >= RETRIEVAL_GATE) {
       created = true;
       console.log("Step: created Match row (needsReview =", m.confidence !== "high", ")");
 
-      // 6) Email the salesperson (only for high-confidence auto-notify)
-      if (m.confidence === "high") {
-        const { data, error } = await sendNewProductMatchEmail({
-          salespersonName: request.salespersonName,
-          salespersonEmail: request.salespersonEmail,
-          customerName: request.customerName,
-          budget: request.budget,
-          match: { productTitle: product.title, productPrice: product.price, productImage: null, score: confidenceToScore(m.confidence), matchedKeywords: [], reason: m.reason },
-          shop: SHOP,
-        }).then((r) => ({ data: r })).catch((e) => ({ error: e }));
-        console.log("Step: email ->", error ? "ERROR " + (error.message || error) : "sent to " + SALES_EMAIL);
-      } else {
-        console.log("Step: email -> skipped (medium/low goes to review queue, no auto-alert)");
-      }
+      // 6) No email — matches are announced only by the scheduled digest
+      // (/api/digest, Mon+Thu). This match would appear in the next digest.
+      console.log("Step: email -> none (digest-only policy; surfaces in next scheduled digest)");
     }
   }
 }

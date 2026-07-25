@@ -6,8 +6,6 @@ import {
 } from "./embeddings.server.js";
 import { reasonMatches, verifyBatch, confidenceToScore } from "./reasoningMatch.server.js";
 import { isOverBudget, budgetCeiling } from "./budget.js";
-import { bumpCounter } from "./aiBudget.server.js";
-import { sendMatchSummaryEmail } from "./email.server.js";
 
 // --- Tunables -------------------------------------------------------------
 const TOP_K = 50; // candidates sent to the AI reasoning pass
@@ -68,9 +66,9 @@ function upsertMatch(shop, request, p, fields) {
 
 /**
  * Create-flow matching: light budget filter → semantic top-K retrieval over the
- * stored (active) catalog → AI reasoning pass. High-confidence matches email the
- * salesperson; medium/low go to the review queue. Never returns an empty screen
- * when stock exists.
+ * stored (active) catalog → AI reasoning pass. High-confidence matches show
+ * directly; medium/low go to the review queue. Sends NO email — matches are
+ * announced only by the scheduled digest (/api/digest).
  */
 export async function runMatchesForRequest(_admin, request) {
   const reqVec = await getRequestEmbedding(request);
@@ -164,7 +162,6 @@ async function runMatchesInner(request, reqVec) {
 
   const byId = new Map(pool.map((r) => [r.productId, r]));
   const ops = [];
-  const notify = [];
   for (const m of matches) {
     const p = byId.get(m.productId);
     if (!p) continue;
@@ -179,52 +176,14 @@ async function runMatchesInner(request, reqVec) {
         overBudget,
       }),
     );
-    // Over-budget items appear in-app (ranked below, labeled) but do not trigger
-    // an auto-notify email.
-    if (!needsReview && !overBudget) {
-      notify.push({
-        productTitle: p.title,
-        productPrice: p.price,
-        productImage: p.image,
-        score: confidenceToScore(m.confidence),
-        matchedKeywords: [],
-        reason: m.reason,
-      });
-    }
   }
   await Promise.all(ops);
   // Matching completed successfully — even if zero matches (a genuine "watching"
   // state, NOT an error).
   await setMatchState(request.id, "ok");
 
-  if (notify.length > 0 && process.env.RESEND_API_KEY) {
-    sendMatchSummaryEmail({
-      salespersonName: request.salespersonName,
-      salespersonEmail: request.salespersonEmail,
-      customerName: request.customerName,
-      budget: request.budget,
-      matches: notify,
-      shop: request.shop,
-    })
-      .then(async () => {
-        // Send-record: a match is emailed at most once, ever.
-        const now = new Date();
-        await prisma.match
-          .updateMany({
-            where: { requestId: request.id, notifiedAt: null, needsReview: false, overBudget: false },
-            data: { notifiedAt: now },
-          })
-          .catch(() => {});
-        await prisma.request
-          .update({
-            where: { id: request.id },
-            data: { lastReminderAt: now, lastMatchEmailAt: now },
-          })
-          .catch(() => {});
-        await bumpCounter("match_emails").catch(() => {});
-      })
-      .catch((err) => console.error("[email] summary send failed:", err));
-  }
+  // NO email here. Matches surface in-app/POS immediately; the ONLY routine
+  // email is the scheduled digest (/api/digest, see app/lib/digestConfig.js).
 
   return ops.length;
 }
