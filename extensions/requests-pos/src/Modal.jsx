@@ -191,8 +191,6 @@ function Modal() {
   };
 
   // Open a matched product's listing on the native POS product-details screen.
-  // Match.productId is a GID (gid://shopify/Product/123); POS deep links use the
-  // numeric id.
   const openProduct = (productGid) => {
     const numId = String(productGid || "").split("/").pop();
     if (!numId) return;
@@ -256,10 +254,12 @@ function Modal() {
   if (boot.status === "loading") {
     return (
       <s-page heading="Match and Request">
-        <s-stack direction="inline" gap="base" alignItems="center">
-          <s-spinner accessibilityLabel="Identifying you" />
-          <s-text>Identifying you…</s-text>
-        </s-stack>
+        <s-box padding="base">
+          <s-stack direction="inline" gap="base" alignItems="center">
+            <s-spinner accessibilityLabel="Identifying you" />
+            <s-text>Identifying you…</s-text>
+          </s-stack>
+        </s-box>
       </s-page>
     );
   }
@@ -267,9 +267,12 @@ function Modal() {
   if (boot.status === "error") {
     return (
       <s-page heading="Match and Request">
-        <s-section heading="Couldn't identify you">
-          <s-text>{boot.message}. Reopen the tile to retry.</s-text>
-        </s-section>
+        <s-box padding="base">
+          <s-stack direction="block" gap="base">
+            <s-banner tone="critical" heading="Couldn't identify you" />
+            <s-text>{boot.message}. Reopen the tile to retry.</s-text>
+          </s-stack>
+        </s-box>
       </s-page>
     );
   }
@@ -280,9 +283,9 @@ function Modal() {
     return (
       <s-page heading="Match and Request">
         <s-scroll-box>
-          <s-stack direction="block" gap="base">
-            <s-banner tone="warning" heading="You're not linked yet" />
-            <s-section heading="Ask an admin to link you">
+          <s-box padding="base">
+            <s-stack direction="block" gap="base">
+              <s-banner tone="warning" heading="You're not linked yet" />
               <s-stack direction="block" gap="small">
                 <s-text>
                   Your POS account isn't connected to a salesperson profile yet,
@@ -295,8 +298,8 @@ function Modal() {
                   Settings → Salespeople.
                 </s-text>
               </s-stack>
-            </s-section>
-          </s-stack>
+            </s-stack>
+          </s-box>
         </s-scroll-box>
       </s-page>
     );
@@ -315,65 +318,61 @@ function Modal() {
     const r = detailReq;
     return (
       <s-page heading={r.customerName}>
+        <s-button slot="secondary-actions" onClick={() => setView("home")}>
+          Back
+        </s-button>
         <s-scroll-box>
-          <s-stack direction="block" gap="base">
-            <s-button variant="secondary" onClick={() => setView("home")}>
-              ← Back to requests
-            </s-button>
-
-            <s-section heading="Request">
+          <s-box padding="base">
+            <s-stack direction="block" gap="base">
               <s-stack direction="block" gap="small">
                 {r.description ? <s-text>{r.description}</s-text> : null}
                 {r.budget != null ? <s-text>Budget: {money(r.budget)}</s-text> : null}
                 <s-text>Salesperson: {r.salespersonName}</s-text>
               </s-stack>
-            </s-section>
 
-            <s-section heading={`Matches (${r.matchCount})`}>
               {r.matches.length === 0 ? (
                 <s-stack direction="block" gap="small">
                   <s-banner tone="info" heading="Not in stock yet — watching" />
                   <s-text>
-                    Nothing in inventory matches yet. This request stays active and
-                    the salesperson is alerted when matching stock arrives.
+                    Nothing in inventory matches yet. This request stays active
+                    and the salesperson is alerted when matching stock arrives.
                   </s-text>
                 </s-stack>
               ) : (
                 r.matches.map((m) => {
                   const conf = confInfo(m);
                   return (
-                    <s-section heading={m.productTitle}>
-                      <s-clickable onClick={() => openProduct(m.productId)}>
-                        <s-box padding="small">
-                          <s-stack direction="block" gap="small">
-                            {m.productImage ? (
-                              <s-box blockSize="200px">
-                                <s-image
-                                  src={m.productImage}
-                                  alt={m.productTitle}
-                                  inlineSize="fill"
-                                  objectFit="contain"
-                                />
-                              </s-box>
-                            ) : null}
-                            {m.productPrice != null ? (
-                              <s-text>{money(m.productPrice)}</s-text>
-                            ) : null}
-                            <s-badge tone={conf.tone}>
-                              {conf.label}
-                              {m.overBudget ? " · over budget" : ""}
-                            </s-badge>
-                            {m.reasoning ? <s-text>{m.reasoning}</s-text> : null}
-                            <s-text tone="info">Tap to open product →</s-text>
-                          </s-stack>
-                        </s-box>
-                      </s-clickable>
-                    </s-section>
+                    <s-clickable onClick={() => openProduct(m.productId)}>
+                      <s-box padding="small">
+                        <s-stack direction="block" gap="small">
+                          {m.productImage ? (
+                            <s-box blockSize="200px">
+                              <s-image
+                                src={m.productImage}
+                                alt={m.productTitle}
+                                inlineSize="fill"
+                                objectFit="contain"
+                              />
+                            </s-box>
+                          ) : null}
+                          <s-text>{m.productTitle}</s-text>
+                          {m.productPrice != null ? (
+                            <s-text>{money(m.productPrice)}</s-text>
+                          ) : null}
+                          <s-badge tone={conf.tone}>
+                            {conf.label}
+                            {m.overBudget ? " · over budget" : ""}
+                          </s-badge>
+                          {m.reasoning ? <s-text>{m.reasoning}</s-text> : null}
+                          <s-text tone="info">Tap to open product →</s-text>
+                        </s-stack>
+                      </s-box>
+                    </s-clickable>
                   );
                 })
               )}
-            </s-section>
-          </s-stack>
+            </s-stack>
+          </s-box>
         </s-scroll-box>
       </s-page>
     );
@@ -384,17 +383,15 @@ function Modal() {
     return (
       <s-page heading="Request created">
         <s-scroll-box>
-          <s-stack direction="block" gap="base">
-            <s-banner tone="success" heading="Request saved" />
-            <s-section heading="What happens next">
+          <s-box padding="base">
+            <s-stack direction="block" gap="base">
+              <s-banner tone="success" heading="Request saved" />
               <s-text>
                 We're searching inventory for matches now. The salesperson is
                 emailed automatically on strong matches, and the request stays
                 active — new arrivals are matched as they come in. Matches appear
                 on the requests list (refresh in a moment).
               </s-text>
-            </s-section>
-            <s-stack direction="block" gap="base">
               <s-button variant="primary" onClick={startNew}>
                 New request
               </s-button>
@@ -402,7 +399,7 @@ function Modal() {
                 Done
               </s-button>
             </s-stack>
-          </s-stack>
+          </s-box>
         </s-scroll-box>
       </s-page>
     );
@@ -412,12 +409,21 @@ function Modal() {
   if (view === "create") {
     return (
       <s-page heading="New request">
+        <s-button
+          slot="secondary-actions"
+          variant="primary"
+          loading={saving}
+          onClick={submit}
+        >
+          Save
+        </s-button>
         <s-scroll-box>
-          <s-stack direction="block" gap="base">
-            {/* Customer — searchable Shopify customer picker */}
-            {customer ? (
-              <s-section heading="Customer">
+          <s-box padding="base">
+            <s-stack direction="block" gap="base">
+              {/* Customer — searchable Shopify customer picker */}
+              {customer ? (
                 <s-stack direction="block" gap="small">
+                  <s-text>Customer</s-text>
                   <s-text>{customer.name}</s-text>
                   {customer.email ? <s-text>{customer.email}</s-text> : null}
                   {customer.phone ? <s-text>{customer.phone}</s-text> : null}
@@ -425,12 +431,10 @@ function Modal() {
                     Change customer
                   </s-button>
                 </s-stack>
-              </s-section>
-            ) : (
-              <s-section heading="Customer">
+              ) : (
                 <s-stack direction="block" gap="small">
                   <s-text-field
-                    label="Search by name, email, or phone"
+                    label="Customer (search name, email, or phone)"
                     value={custQuery}
                     placeholder="Jane, jane@email.com, or 555-1234"
                     onInput={(e) => setCustQuery(e.currentTarget.value)}
@@ -438,14 +442,18 @@ function Modal() {
                   {custSearching ? <s-text>Searching…</s-text> : null}
                   {custError ? <s-text tone="critical">{custError}</s-text> : null}
                   {custResults.map((c) => (
-                    <s-button
-                      variant="secondary"
-                      onClick={() => selectCustomer(c)}
-                    >
-                      {c.name}
-                      {c.email ? ` · ${c.email}` : ""}
-                      {c.phone ? ` · ${c.phone}` : ""}
-                    </s-button>
+                    <s-clickable onClick={() => selectCustomer(c)}>
+                      <s-box padding="small">
+                        <s-stack direction="block" gap="small">
+                          <s-text>{c.name}</s-text>
+                          {c.email || c.phone ? (
+                            <s-text>
+                              {[c.email, c.phone].filter(Boolean).join(" · ")}
+                            </s-text>
+                          ) : null}
+                        </s-stack>
+                      </s-box>
+                    </s-clickable>
                   ))}
                   {!custSearching &&
                   !custError &&
@@ -454,61 +462,60 @@ function Modal() {
                     <s-text>No customers found.</s-text>
                   ) : null}
                 </s-stack>
-              </s-section>
-            )}
+              )}
 
-            {/* Description (required) */}
-            <s-text-area
-              label="Description"
-              value={form.description}
-              rows={4}
-              required
-              details="What the customer is looking for, in plain English."
-              placeholder="e.g. grand seiko watch with a round dial"
-              onInput={(e) => updateForm("description", e.currentTarget.value)}
-            />
+              {/* Description (required) */}
+              <s-text-area
+                label="Description"
+                value={form.description}
+                rows={4}
+                required
+                details="What the customer is looking for, in plain English."
+                placeholder="e.g. grand seiko watch with a round dial"
+                onInput={(e) => updateForm("description", e.currentTarget.value)}
+              />
 
-            {/* Budget (optional) — below description */}
-            <s-text-field
-              label="Budget (optional)"
-              value={form.budget}
-              placeholder="2500"
-              onInput={(e) => updateForm("budget", e.currentTarget.value)}
-            />
+              {/* Budget (optional) */}
+              <s-text-field
+                label="Budget (optional)"
+                value={form.budget}
+                placeholder="2500"
+                onInput={(e) => updateForm("budget", e.currentTarget.value)}
+              />
 
-            {/* Salesperson auto-set to the logged-in person. Admins may reassign. */}
-            {isAdmin &&
-              roster.length > 0 &&
-              (assigning ? (
-                <s-section heading="Assign to salesperson">
-                  <s-choice-list
-                    onChange={(e) =>
-                      setPickedEmail(e.currentTarget.values?.[0] ?? me.email)
-                    }
-                  >
-                    {roster.map((s) => (
-                      <s-choice value={s.email} selected={s.email === pickedEmail}>
-                        {s.name}
-                        {s.email === me.email ? " (you)" : ""}
-                      </s-choice>
-                    ))}
-                  </s-choice-list>
-                </s-section>
-              ) : (
-                <s-stack direction="block" gap="small">
-                  <s-text>Salesperson: {assignedName}</s-text>
-                  <s-button variant="secondary" onClick={() => setAssigning(true)}>
-                    Assign to another salesperson
-                  </s-button>
-                </s-stack>
-              ))}
+              {/* Salesperson auto-set. Admins may reassign. */}
+              {isAdmin &&
+                roster.length > 0 &&
+                (assigning ? (
+                  <s-stack direction="block" gap="small">
+                    <s-text>Assign to salesperson</s-text>
+                    <s-choice-list
+                      onChange={(e) =>
+                        setPickedEmail(e.currentTarget.values?.[0] ?? me.email)
+                      }
+                    >
+                      {roster.map((s) => (
+                        <s-choice value={s.email} selected={s.email === pickedEmail}>
+                          {s.name}
+                          {s.email === me.email ? " (you)" : ""}
+                        </s-choice>
+                      ))}
+                    </s-choice-list>
+                  </s-stack>
+                ) : (
+                  <s-stack direction="block" gap="small">
+                    <s-text>Salesperson: {assignedName}</s-text>
+                    <s-button
+                      variant="secondary"
+                      onClick={() => setAssigning(true)}
+                    >
+                      Assign to another salesperson
+                    </s-button>
+                  </s-stack>
+                ))}
 
-            {saveError ? <s-text tone="critical">{saveError}</s-text> : null}
+              {saveError ? <s-text tone="critical">{saveError}</s-text> : null}
 
-            <s-stack direction="block" gap="base">
-              <s-button variant="primary" loading={saving} onClick={submit}>
-                Save & find matches
-              </s-button>
               <s-button
                 variant="secondary"
                 disabled={saving}
@@ -517,7 +524,7 @@ function Modal() {
                 Cancel
               </s-button>
             </s-stack>
-          </s-stack>
+          </s-box>
         </s-scroll-box>
       </s-page>
     );
@@ -527,19 +534,19 @@ function Modal() {
   const requests = reqState.requests || [];
   return (
     <s-page heading="Match and Request">
+      <s-button slot="secondary-actions" variant="primary" onClick={startNew}>
+        New request
+      </s-button>
       <s-scroll-box>
-        <s-stack direction="block" gap="base">
-          <s-stack direction="block" gap="small">
-            <s-text>Signed in as {me.name}</s-text>
-            <s-badge tone={isAdmin ? "info" : "success"}>
-              {isAdmin ? "Admin — all requests" : "Salesperson — your requests"}
-            </s-badge>
-          </s-stack>
-
+        <s-box padding="base">
           <s-stack direction="block" gap="base">
-            <s-button variant="primary" onClick={startNew}>
-              New request
-            </s-button>
+            <s-stack direction="block" gap="small">
+              <s-text>Signed in as {me.name}</s-text>
+              <s-badge tone={isAdmin ? "info" : "success"}>
+                {isAdmin ? "Admin — all requests" : "Salesperson — your requests"}
+              </s-badge>
+            </s-stack>
+
             <s-button
               variant="secondary"
               loading={reqState.status === "loading"}
@@ -547,40 +554,43 @@ function Modal() {
             >
               Refresh
             </s-button>
-          </s-stack>
 
-          {reqState.status === "loading" && requests.length === 0 ? (
-            <s-stack direction="inline" gap="base" alignItems="center">
-              <s-spinner accessibilityLabel="Loading requests" />
-              <s-text>Loading requests…</s-text>
-            </s-stack>
-          ) : reqState.status === "error" ? (
-            <s-text tone="critical">
-              Couldn't load requests: {reqState.error}
-            </s-text>
-          ) : requests.length === 0 ? (
-            <s-section heading="Requests">
+            {reqState.status === "loading" && requests.length === 0 ? (
+              <s-stack direction="inline" gap="base" alignItems="center">
+                <s-spinner accessibilityLabel="Loading requests" />
+                <s-text>Loading requests…</s-text>
+              </s-stack>
+            ) : reqState.status === "error" ? (
+              <s-text tone="critical">
+                Couldn't load requests: {reqState.error}
+              </s-text>
+            ) : requests.length === 0 ? (
               <s-text>No active requests yet. Tap “New request” to add one.</s-text>
-            </s-section>
-          ) : (
-            requests.map((r) => (
-              <s-section heading={r.customerName}>
-                <s-stack direction="block" gap="small">
-                  {isAdmin ? (
-                    <s-text>Salesperson: {r.salespersonName}</s-text>
-                  ) : null}
-                  {r.description ? <s-text>{r.description}</s-text> : null}
-                  {r.budget != null ? <s-text>Budget: {money(r.budget)}</s-text> : null}
-                  <s-button variant="secondary" onClick={() => openRequest(r)}>
-                    {r.matchCount > 0
-                      ? `View ${r.matchCount} match${r.matchCount === 1 ? "" : "es"}`
-                      : "Watching — no matches yet"}
-                  </s-button>
-                </s-stack>
-              </s-section>
-            ))
-          )}
-        </s-stack>
+            ) : (
+              requests.map((r) => (
+                <s-clickable onClick={() => openRequest(r)}>
+                  <s-box padding="small">
+                    <s-stack direction="block" gap="small">
+                      <s-text>{r.customerName}</s-text>
+                      {isAdmin ? (
+                        <s-text>Salesperson: {r.salespersonName}</s-text>
+                      ) : null}
+                      {r.description ? <s-text>{r.description}</s-text> : null}
+                      {r.budget != null ? (
+                        <s-text>Budget: {money(r.budget)}</s-text>
+                      ) : null}
+                      <s-badge tone={r.matchCount > 0 ? "success" : "neutral"}>
+                        {r.matchCount > 0
+                          ? `${r.matchCount} match${r.matchCount === 1 ? "" : "es"} · tap to view`
+                          : "Watching — no matches yet"}
+                      </s-badge>
+                    </s-stack>
+                  </s-box>
+                </s-clickable>
+              ))
+            )}
+          </s-stack>
+        </s-box>
       </s-scroll-box>
     </s-page>
   );
