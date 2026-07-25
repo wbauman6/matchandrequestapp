@@ -55,6 +55,10 @@ function Modal() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
 
+  // Request/match actions (fulfill, decline).
+  const [actionBusy, setActionBusy] = useState(null); // e.g. "req:<id>" | "match:<id>"
+  const [actionError, setActionError] = useState("");
+
   // Customer picker (search Shopify customers by name/email/phone).
   const [customer, setCustomer] = useState(null);
   const [custQuery, setCustQuery] = useState("");
@@ -186,9 +190,66 @@ function Modal() {
   };
 
   const openRequest = (r) => {
+    setActionError("");
     setDetailReq(r);
     setView("detail");
   };
+
+  // Mark a request fulfilled — same status change the admin app makes. On success
+  // the request leaves the active list, so return home and refresh.
+  async function fulfillRequest(r) {
+    setActionBusy(`req:${r.id}`);
+    setActionError("");
+    try {
+      const res = await fetch(`/api/pos/requests/${r.id}`, {
+        method: "POST",
+        headers: await authHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ status: "fulfilled" }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.error || !data.ok) {
+        throw new Error(data.error || `Server returned ${res.status}`);
+      }
+      await loadRequests();
+      setView("home");
+    } catch (err) {
+      setActionError(String(err?.message || err));
+    } finally {
+      setActionBusy(null);
+    }
+  }
+
+  // Decline a single match — same fields the admin app sets (declined + read).
+  async function declineMatch(m) {
+    setActionBusy(`match:${m.id}`);
+    setActionError("");
+    try {
+      const res = await fetch(`/api/pos/matches/${m.id}`, {
+        method: "POST",
+        headers: await authHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ _action: "decline" }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.error || !data.ok) {
+        throw new Error(data.error || `Server returned ${res.status}`);
+      }
+      // Remove it locally and keep the list in sync.
+      setDetailReq((r) =>
+        r
+          ? {
+              ...r,
+              matches: r.matches.filter((x) => x.id !== m.id),
+              matchCount: Math.max(0, (r.matchCount || 0) - 1),
+            }
+          : r,
+      );
+      loadRequests();
+    } catch (err) {
+      setActionError(String(err?.message || err));
+    } finally {
+      setActionBusy(null);
+    }
+  }
 
   // Open a matched product's listing on the native POS product-details screen.
   const openProduct = (productGid) => {
@@ -328,7 +389,22 @@ function Modal() {
                 {r.description ? <s-text>{r.description}</s-text> : null}
                 {r.budget != null ? <s-text>Budget: {money(r.budget)}</s-text> : null}
                 <s-text>Salesperson: {r.salespersonName}</s-text>
+                {r.status !== "fulfilled" ? (
+                  <s-button
+                    variant="primary"
+                    loading={actionBusy === `req:${r.id}`}
+                    onClick={() => fulfillRequest(r)}
+                  >
+                    Mark fulfilled
+                  </s-button>
+                ) : (
+                  <s-badge tone="success">Fulfilled</s-badge>
+                )}
               </s-stack>
+
+              {actionError ? (
+                <s-text tone="critical">{actionError}</s-text>
+              ) : null}
 
               {r.matches.length === 0 ? (
                 <s-stack direction="block" gap="small">
@@ -342,32 +418,43 @@ function Modal() {
                 r.matches.map((m) => {
                   const conf = confInfo(m);
                   return (
-                    <s-clickable onClick={() => openProduct(m.productId)}>
-                      <s-box padding="small">
-                        <s-stack direction="block" gap="small">
-                          {m.productImage ? (
-                            <s-box blockSize="200px">
-                              <s-image
-                                src={m.productImage}
-                                alt={m.productTitle}
-                                inlineSize="fill"
-                                objectFit="contain"
-                              />
-                            </s-box>
-                          ) : null}
-                          <s-text>{m.productTitle}</s-text>
-                          {m.productPrice != null ? (
-                            <s-text>{money(m.productPrice)}</s-text>
-                          ) : null}
-                          <s-badge tone={conf.tone}>
-                            {conf.label}
-                            {m.overBudget ? " · over budget" : ""}
-                          </s-badge>
-                          {m.reasoning ? <s-text>{m.reasoning}</s-text> : null}
-                          <s-text tone="info">Tap to open product →</s-text>
-                        </s-stack>
-                      </s-box>
-                    </s-clickable>
+                    <s-box padding="small">
+                      <s-stack direction="block" gap="small">
+                        {m.productImage ? (
+                          <s-box blockSize="200px">
+                            <s-image
+                              src={m.productImage}
+                              alt={m.productTitle}
+                              inlineSize="fill"
+                              objectFit="contain"
+                            />
+                          </s-box>
+                        ) : null}
+                        <s-text>{m.productTitle}</s-text>
+                        {m.productPrice != null ? (
+                          <s-text>{money(m.productPrice)}</s-text>
+                        ) : null}
+                        <s-badge tone={conf.tone}>
+                          {conf.label}
+                          {m.overBudget ? " · over budget" : ""}
+                        </s-badge>
+                        {m.reasoning ? <s-text>{m.reasoning}</s-text> : null}
+                        <s-button
+                          variant="secondary"
+                          onClick={() => openProduct(m.productId)}
+                        >
+                          Open product
+                        </s-button>
+                        <s-button
+                          variant="secondary"
+                          tone="critical"
+                          loading={actionBusy === `match:${m.id}`}
+                          onClick={() => declineMatch(m)}
+                        >
+                          Decline
+                        </s-button>
+                      </s-stack>
+                    </s-box>
                   );
                 })
               )}
