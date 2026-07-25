@@ -9,6 +9,7 @@ import {
 import { reasonMatches, verifyBatch, confidenceToScore } from "./reasoningMatch.server.js";
 import { getRequestEmbedding } from "./matchRunner.server.js";
 import { withinBudget, isOverBudget } from "./budget.js";
+import { isDropWindow } from "./dropSchedule.js";
 
 // --- Tunables ---------------------------------------------------------------
 const RETRIEVAL_GATE = 0.35; // min cosine for a queued product to be judged for a request
@@ -134,6 +135,26 @@ async function fetchAvailability(shop, productIds) {
   }
 }
 
+/**
+ * Mid-week sell-through screening (NO AI): verify the given queued products'
+ * availability against the Admin API and clean up any that are sold or gone —
+ * so a sale removes its matches within seconds even though matching itself
+ * only runs in the weekly drop window. In-stock items stay queued for Tuesday.
+ */
+export async function screenQueueAvailability(shop, productIds) {
+  if (!productIds?.length) return 0;
+  const avail = await fetchAvailability(shop, productIds);
+  if (!avail) return 0;
+  let removed = 0;
+  for (const [productId, a] of avail) {
+    if (a.active && a.inStock) continue;
+    await removeFromMatching(shop, productId, { gone: !a.active });
+    await prisma.productQueue.deleteMany({ where: { shop, productId } }).catch(() => {});
+    removed++;
+  }
+  return removed;
+}
+
 // Cleanup for a product that is archived/deleted (gone=true) or sold: drop its
 // non-declined matches and reasoned-pair records; gone also drops the
 // embedding, sold just flags it out-of-stock (kept for restocks).
@@ -189,9 +210,16 @@ async function ensureProductEmbedding(shop, product) {
  *
  * Returns { processed, matched, aborted } — aborted is set when the AI budget
  * kill switch (or a dead key) stops work with items still queued.
+ *
+ * WEEKLY SCHEDULE: inventory only changes at the Tuesday 4 PM ET drop, so the
+ * drain refuses to run outside that window (see app/lib/dropSchedule.js) —
+ * mid-week product-record churn just accumulates in the queue at zero AI cost
+ * and is judged once during the next drop window. Pass { force: true }
+ * (manual /api/drain-queue only) to override.
  */
-export async function drainProductQueue(shop) {
+export async function drainProductQueue(shop, { force = false } = {}) {
   const stats = { processed: 0, matched: 0, aborted: false };
+  if (!force && !isDropWindow()) return { ...stats, skipped: "outside weekly drop window" };
   if (!hasEmbeddingKey() || !process.env.ANTHROPIC_API_KEY) return stats; // leave queued
   if (!(await acquireDrainLock(shop))) return stats; // another worker is on it
 

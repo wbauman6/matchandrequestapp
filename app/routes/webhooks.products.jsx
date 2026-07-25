@@ -1,6 +1,7 @@
 import { waitUntil } from "@vercel/functions";
 import { authenticate } from "../shopify.server";
-import { enqueueProduct, drainProductQueue } from "../lib/productQueue.server";
+import { enqueueProduct, drainProductQueue, screenQueueAvailability } from "../lib/productQueue.server";
+import { isDropWindow } from "../lib/dropSchedule.js";
 
 /**
  * Handles products/create and products/update webhooks.
@@ -89,11 +90,15 @@ export const action = async ({ request }) => {
     console.error(`[${topic}] enqueue failed for ${product.id}:`, err);
   }
 
-  // Kick a drain attempt in the background (no-op if another worker holds the
-  // per-shop lease). The response goes out immediately.
-  const work = drainProductQueue(shop).catch((err) =>
-    console.error(`[${topic}] drain failed:`, err?.message || err),
-  );
+  // Inventory only changes at the weekly Tuesday-4PM-ET drop. During that
+  // window the drop's own webhooks trigger draining (AI matching); the rest of
+  // the week a webhook only screens availability (no AI) so a SALE still
+  // removes its matches within seconds, and everything else waits queued for
+  // Tuesday. The response goes out immediately either way.
+  const work = (isDropWindow()
+    ? drainProductQueue(shop)
+    : screenQueueAvailability(shop, [product.id])
+  ).catch((err) => console.error(`[${topic}] background work failed:`, err?.message || err));
   try {
     waitUntil(work);
   } catch {

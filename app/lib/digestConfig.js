@@ -3,13 +3,14 @@
  *
  * >>> EDIT THIS FILE to change when digests go out. <<<
  *
- * The Vercel cron fires the /api/digest route once every day (time set in
- * vercel.json, currently 13:00 UTC ≈ 9 AM New York in summer / 8 AM winter);
- * the route then only actually sends on the weekdays listed here, evaluated
- * in DIGEST_TIMEZONE. So: to change the DAYS, edit this file; to change the
- * TIME of day, edit the cron expression in vercel.json.
+ * The Vercel cron fires the /api/digest route on the days below (also encoded
+ * in vercel.json's cron day-of-week field — keep them in sync) at 14:15 UTC:
+ * 10:15 AM Eastern during daylight time, 9:15 AM in winter (Vercel Hobby crons
+ * are fixed-UTC, so the exact local hour shifts one hour across DST).
+ * To change the DAYS, edit this list AND the vercel.json cron; to change the
+ * TIME, edit the cron expression in vercel.json.
  */
-export const DIGEST_DAYS = ["monday", "thursday"];
+export const DIGEST_DAYS = ["wednesday", "saturday"];
 
 export const DIGEST_TIMEZONE = "America/New_York";
 

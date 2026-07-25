@@ -27,7 +27,8 @@ export const loader = async ({ request }) => {
 
   const results = [];
   for (const s of shops) {
-    const drained = await drainProductQueue(s.shop).catch((e) => {
+    // Manual, secret-protected route — force past the weekly-drop window gate.
+    const drained = await drainProductQueue(s.shop, { force: true }).catch((e) => {
       console.error("[drain-queue] drain failed for", s.shop, e?.message || e);
       return { processed: 0, matched: 0, aborted: true };
     });

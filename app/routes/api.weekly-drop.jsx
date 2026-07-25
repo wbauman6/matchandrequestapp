@@ -1,25 +1,33 @@
 /**
- * GET /api/check-products
+ * GET /api/weekly-drop
  *
- * Daily safety net for keep-watching. Webhooks (products/create, products/update)
- * check every new/changed product against active requests in real time; this
- * cron catches any product a webhook may have missed (delivery failure, downtime)
- * by finding active products that have no stored embedding yet and running them
- * through the same matcher.
+ * Cron backstop for the WEEKLY drop match (Tuesday 4:00 PM Eastern — see
+ * app/lib/dropSchedule.js). The drop's own products/create|update webhooks
+ * normally trigger draining the moment inventory lands; this cron (Tue 22:00
+ * UTC = 5 PM EDT / 6 PM EST, always inside the window) catches anything they
+ * missed: it sweeps the catalog for active products with no stored embedding,
+ * enqueues them, then drains the whole queue (the week's accumulated events +
+ * the drop) in batched AI calls.
  *
- * Protected by CRON_SECRET (Vercel sends Authorization: Bearer <CRON_SECRET>).
+ * Outside the drop window it's a no-op (?force=1 overrides, for testing).
+ * Protected by CRON_SECRET.
  */
 import prisma from "../db.server.js";
 import { enqueueProduct, drainProductQueue } from "../lib/productQueue.server.js";
+import { isDropWindow } from "../lib/dropSchedule.js";
 
 const API_VERSION = "2025-10";
-const MAX_PER_RUN = 40; // bound cost/time; repeated daily runs catch up
+const MAX_PER_RUN = 400; // weekly bound on brand-new products swept in per run
 
 export const loader = async ({ request }) => {
   const secret = process.env.CRON_SECRET;
   if (secret) {
     const token = (request.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
     if (token !== secret) return new Response("Unauthorized", { status: 401 });
+  }
+  const force = new URL(request.url).searchParams.get("force") === "1";
+  if (!isDropWindow() && !force) {
+    return Response.json({ ok: true, skipped: "outside weekly drop window" });
   }
 
   const sessions = await prisma.session.findMany({ where: { isOnline: false } });
@@ -31,14 +39,13 @@ export const loader = async ({ request }) => {
     const endpoint = `https://${shop}/admin/api/${API_VERSION}/graphql.json`;
     const QUERY = `query($cursor:String){ products(first:250, after:$cursor, query:"status:active"){ pageInfo{hasNextPage endCursor} edges{ node{ id title description tags totalInventory tracksInventory priceRangeV2{minVariantPrice{amount}} featuredImage{url} } } } }`;
 
-    // Existing embeddings = products already processed.
     const embedded = new Set(
       (await prisma.productEmbedding.findMany({ where: { shop }, select: { productId: true } })).map(
         (e) => e.productId,
       ),
     );
 
-    let processed = 0;
+    let enqueued = 0;
     let cursor = null;
     let hasNext = true;
     let stop = false;
@@ -56,9 +63,9 @@ export const loader = async ({ request }) => {
         }
         const page = json.data.products;
         for (const { node } of page.edges) {
-          if (embedded.has(node.id)) continue; // already processed
+          if (embedded.has(node.id)) continue; // already known; webhooks queued any changes
           const amount = node.priceRangeV2?.minVariantPrice?.amount;
-          const product = {
+          await enqueueProduct(shop, {
             id: node.id,
             title: node.title || "",
             description: node.description || "",
@@ -66,15 +73,10 @@ export const loader = async ({ request }) => {
             price: amount != null ? parseFloat(amount) : null,
             image: node.featuredImage?.url || null,
             active: true,
-            // Untracked inventory = always purchasable; tracked = needs
-            // available > 0. Sold (0-available) items never match.
             inStock: !node.tracksInventory || (node.totalInventory ?? 0) > 0,
-          };
-          await enqueueProduct(shop, product).catch((e) => {
-            console.error("[check-products] enqueue failed:", e?.message || e);
-          });
-          processed++;
-          if (processed >= MAX_PER_RUN) { stop = true; break; }
+          }).catch((e) => console.error("[weekly-drop] enqueue failed:", e?.message || e));
+          enqueued++;
+          if (enqueued >= MAX_PER_RUN) { stop = true; break; }
         }
         hasNext = page.pageInfo.hasNextPage;
         cursor = page.pageInfo.endCursor;
@@ -83,13 +85,11 @@ export const loader = async ({ request }) => {
       results.push({ shop, error: err?.message || String(err) });
       continue;
     }
-    // Drain the queue (covers both what we just enqueued and any backlog the
-    // webhook-triggered drains left behind, e.g. after an AI-budget abort).
-    const drained = await drainProductQueue(shop).catch((e) => {
-      console.error("[check-products] drain failed:", e?.message || e);
+    const drained = await drainProductQueue(shop, { force }).catch((e) => {
+      console.error("[weekly-drop] drain failed:", e?.message || e);
       return { processed: 0, matched: 0, aborted: true };
     });
-    results.push({ shop, newEnqueued: processed, drained });
+    results.push({ shop, newEnqueued: enqueued, drained });
   }
 
   return Response.json({ ok: true, timestamp: new Date().toISOString(), results });
