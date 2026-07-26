@@ -4,7 +4,7 @@ import {
   buildRequestText,
   hasEmbeddingKey,
 } from "./embeddings.server.js";
-import { expandAbbreviations } from "./requestClean.js";
+import { normalizeRequestTerms } from "./jewelryTerms.js";
 import { reasonMatches, verifyBatch, confidenceToScore } from "./reasoningMatch.server.js";
 import { isOverBudget, budgetCeiling } from "./budget.js";
 import { applyDynamicCap, RETRIEVAL_CEILING } from "./retrievalConfig.js";
@@ -136,9 +136,10 @@ async function runMatchesInner(request, reqVec) {
   // tight set; broad queries → many, up to the ceiling.
   const pool = applyDynamicCap(rows.filter((r) => !declinedIds.has(r.productId)));
 
-  // Step 3 — AI reasoning pass. Jeweler shorthand in the request (DIA, WG, …) is
-  // expanded so the AI gates on the same full words the embedding was built from.
-  const reasoningText = expandAbbreviations(request.description || "");
+  // Step 3 — AI reasoning pass. Jeweler terms in the request (DIA, WG, GS,
+  // "diamond by the yard", …) are normalized so the AI gates on the same
+  // canonical words the embedding was built from.
+  const reasoningText = normalizeRequestTerms(request.description || "");
   const candidates = pool.map((p) => ({
     productId: p.productId,
     title: p.title,

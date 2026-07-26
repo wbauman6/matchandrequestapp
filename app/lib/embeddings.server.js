@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { cleanRequestText } from "./requestClean.js";
+import { normalizeProductTerms } from "./jewelryTerms.js";
 
 const VOYAGE_URL = "https://api.voyageai.com/v1/embeddings";
 const MODEL = "voyage-3";
@@ -22,11 +23,15 @@ export function buildProductText(product) {
   const tags = (product.tags || []).join(", ");
   const title = product.title || "";
   // Weight the title heavily (repeat it) so title-similar products surface even
-  // when tags/description are thin or missing.
-  return [title, title, title, product.description, tags]
-    .filter(Boolean)
-    .join(". ")
-    .slice(0, MAX_EMBED_CHARS);
+  // when tags/description are thin or missing. Normalize phrase synonyms
+  // ("diamond by the yard"→"diamond station") so products speak the same
+  // canonical vocabulary as normalized requests. Only "both"-scope equivalents
+  // apply here — never the request-only abbreviations (a watch's "SS" must stay
+  // stainless steel, not become sterling silver).
+  const text = [title, title, title, product.description, tags].filter(Boolean).join(". ");
+  // collapse:false so products WITHOUT a normalizable phrase keep an identical
+  // hash (no needless re-embed); only the handful with "by the yard" etc. change.
+  return normalizeProductTerms(text, { collapse: false }).slice(0, MAX_EMBED_CHARS);
 }
 
 export function buildRequestText(request) {

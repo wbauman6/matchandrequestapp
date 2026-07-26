@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { metalToneRules } from "./metalTone.js";
+import { relatedTermsGuidance, normalizeProductTerms } from "./jewelryTerms.js";
 import { trackAiCall, AiBudgetExceededError } from "./aiBudget.server.js";
 
 let client = null;
@@ -68,6 +69,8 @@ ${metalToneRules()}
 
 Do NOT over-apply vague/aesthetic terms ("elegant", "classic", "dainty") — those shade ranking, they are not gates.
 
+${relatedTermsGuidance()}
+
 For EACH candidate: exclude it if it fails ANY specified attribute; otherwise include it. Rank included matches high → medium → low by overall fit.
 
 ZERO MATCHES IS A VALID, CORRECT ANSWER. If NO candidate passes every specified attribute, return an EMPTY matches array. NEVER substitute across a specified attribute (e.g. never return a natural-diamond ring for a lab-grown request, or a white-gold ring for a yellow-gold request) just to avoid an empty result. Never include a candidate that fails a specified attribute gate.
@@ -107,12 +110,15 @@ export async function reasonMatches({ description, budget, candidates }) {
 
   const list = candidates.map((p) => ({
     product_id: p.productId,
-    title: p.title || "",
+    // Normalize phrase synonyms so the product speaks the same canonical
+    // vocabulary as the normalized request ("by the yard"→"station"). Only
+    // "both"-scope equivalents apply — never the request-only abbreviations.
+    title: normalizeProductTerms(p.title || ""),
     // Full description — no truncation. Estate listings bury the spec table
     // (Brand, metal, dial color, stone) at the END of a long description; a cap
     // hid it (e.g. "Brand:Grand Seiko" at char ~2300 on the Omiwatari), making
     // the AI gate on the misleading title alone.
-    description: p.description || "",
+    description: normalizeProductTerms(p.description || ""),
     price: p.price ?? null,
   }));
 
@@ -179,8 +185,8 @@ export async function verifyBatch({ description, candidates }) {
   if (!c || !candidates?.length) return allIds;
   const list = candidates.map((p) => ({
     product_id: p.productId,
-    title: p.title || "",
-    description: p.description || "", // full description — see reasonMatches note
+    title: normalizeProductTerms(p.title || ""), // canonical vocabulary — see reasonMatches note
+    description: normalizeProductTerms(p.description || ""), // full description — see reasonMatches note
   }));
   const user = `Customer request: "${description}"
 
