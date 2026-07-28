@@ -464,56 +464,61 @@ function Modal() {
               </s-stack>
 
               {refining ? null : r.matches.length === 0 ? (
-                <s-stack direction="block" gap="small">
+                <s-section heading="Matches">
                   <s-banner tone="info" heading="Not in stock yet — watching" />
                   <s-text>
                     Nothing in inventory matches yet. This request stays active
                     and the salesperson is alerted when matching stock arrives.
                   </s-text>
-                </s-stack>
+                </s-section>
               ) : (
-                r.matches.map((m) => {
-                  const conf = confInfo(m);
-                  return (
-                    <s-box padding="small">
-                      <s-stack direction="block" gap="small">
-                        {m.productImage ? (
-                          <s-box blockSize="200px">
-                            <s-image
-                              src={m.productImage}
-                              alt={m.productTitle}
-                              inlineSize="fill"
-                              objectFit="contain"
-                            />
-                          </s-box>
-                        ) : null}
-                        <s-text>{m.productTitle}</s-text>
-                        {m.productPrice != null ? (
-                          <s-text>{money(m.productPrice)}</s-text>
-                        ) : null}
-                        <s-badge tone={conf.tone}>
-                          {conf.label}
-                          {m.overBudget ? " · over budget" : ""}
-                        </s-badge>
-                        {m.reasoning ? <s-text>{m.reasoning}</s-text> : null}
-                        <s-button
-                          variant="secondary"
-                          onClick={() => openProduct(m.productId)}
-                        >
-                          Open product
-                        </s-button>
-                        <s-button
-                          variant="secondary"
-                          tone="critical"
-                          loading={actionBusy === `match:${m.id}`}
-                          onClick={() => declineMatch(m)}
-                        >
-                          Decline
-                        </s-button>
-                      </s-stack>
-                    </s-box>
-                  );
-                })
+                <s-section heading={`Matches (${r.matchCount})`}>
+                  {r.matches.flatMap((m, i) => {
+                    const conf = confInfo(m);
+                    const row = (
+                      <s-box key={m.id} padding="base">
+                        <s-stack direction="block" gap="small">
+                          {m.productImage ? (
+                            <s-box blockSize="200px">
+                              <s-image
+                                src={m.productImage}
+                                alt={m.productTitle}
+                                inlineSize="fill"
+                                objectFit="contain"
+                              />
+                            </s-box>
+                          ) : null}
+                          <s-text>{m.productTitle}</s-text>
+                          <s-stack direction="inline" gap="small" alignItems="center">
+                            {m.productPrice != null ? (
+                              <s-text>{money(m.productPrice)}</s-text>
+                            ) : null}
+                            <s-badge tone={conf.tone}>
+                              {conf.label}
+                              {m.overBudget ? " · over budget" : ""}
+                            </s-badge>
+                          </s-stack>
+                          {m.reasoning ? <s-text>{m.reasoning}</s-text> : null}
+                          <s-button
+                            variant="secondary"
+                            onClick={() => openProduct(m.productId)}
+                          >
+                            Open product
+                          </s-button>
+                          <s-button
+                            variant="secondary"
+                            tone="critical"
+                            loading={actionBusy === `match:${m.id}`}
+                            onClick={() => declineMatch(m)}
+                          >
+                            Decline
+                          </s-button>
+                        </s-stack>
+                      </s-box>
+                    );
+                    return i === 0 ? [row] : [<s-divider key={`d-${m.id}`} />, row];
+                  })}
+                </s-section>
               )}
             </s-stack>
           </s-box>
