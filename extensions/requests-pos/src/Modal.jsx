@@ -709,29 +709,46 @@ function Modal() {
                 Couldn't load requests: {reqState.error}
               </s-text>
             ) : requests.length === 0 ? (
-              <s-text>No active requests yet. Tap “New request” to add one.</s-text>
+              <s-section heading="Requests">
+                <s-text>No active requests yet. Tap “New request” to add one.</s-text>
+              </s-section>
             ) : (
-              requests.map((r) => (
-                <s-clickable onClick={() => openRequest(r)}>
-                  <s-box padding="small">
-                    <s-stack direction="block" gap="small">
-                      <s-text>{r.customerName}</s-text>
-                      {isAdmin ? (
-                        <s-text>Salesperson: {r.salespersonName}</s-text>
-                      ) : null}
-                      {r.description ? <s-text>{r.description}</s-text> : null}
-                      {r.budget != null ? (
-                        <s-text>Budget: {money(r.budget)}</s-text>
-                      ) : null}
-                      <s-badge tone={r.matchCount > 0 ? "success" : "neutral"}>
-                        {r.matchCount > 0
-                          ? `${r.matchCount} match${r.matchCount === 1 ? "" : "es"} · tap to view`
-                          : "Watching — no matches yet"}
-                      </s-badge>
-                    </s-stack>
-                  </s-box>
-                </s-clickable>
-              ))
+              <s-section
+                heading={`${isAdmin ? "All requests" : "Your requests"} (${requests.length})`}
+              >
+                {requests.flatMap((r, i) => {
+                  const row = (
+                    <s-clickable key={r.id} onClick={() => openRequest(r)}>
+                      <s-box padding="base">
+                        <s-stack direction="block" gap="small">
+                          <s-stack
+                            direction="inline"
+                            gap="small"
+                            alignItems="center"
+                          >
+                            <s-text>{r.customerName}</s-text>
+                            <s-badge tone={r.matchCount > 0 ? "success" : "neutral"}>
+                              {r.matchCount > 0
+                                ? `${r.matchCount} match${r.matchCount === 1 ? "" : "es"}`
+                                : "watching"}
+                            </s-badge>
+                          </s-stack>
+                          {isAdmin ? (
+                            <s-text>Salesperson: {r.salespersonName}</s-text>
+                          ) : null}
+                          {r.description ? <s-text>{r.description}</s-text> : null}
+                          {r.budget != null ? (
+                            <s-text>Budget: {money(r.budget)}</s-text>
+                          ) : null}
+                        </s-stack>
+                      </s-box>
+                    </s-clickable>
+                  );
+                  return i === 0
+                    ? [row]
+                    : [<s-divider key={`d-${r.id}`} />, row];
+                })}
+              </s-section>
             )}
           </s-stack>
         </s-box>
