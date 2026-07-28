@@ -69,7 +69,7 @@ Attributes (check only those the customer actually specified):
 • SETTING/form — cluster, solitaire, halo, three-stone, eternity, tennis, signet, pavé, channel-set, bezel, stud, hoop, huggie, riviera. MUTUALLY EXCLUSIVE and NOT interchangeable: a halo (incl. "hidden halo") is NOT a cluster; a three-stone is NOT a cluster; a bypass/five-stone/row ring is NOT a cluster; a solitaire is NOT a cluster.
 • METAL / TONE — apply the METAL vs TONE rules below.
 • DIAMOND/STONE ORIGIN — natural vs lab-grown (a.k.a. lab-created / lab grown / man-made / synthetic). CRITICAL: an unqualified "diamond" / "DIA" request does NOT imply natural — treat origin as UNSPECIFIED and show BOTH natural AND lab-grown. Exclude one ONLY when the customer explicitly writes "natural" (→ exclude lab-grown) or "lab" / "lab grown" / "lab-created" / "man-made" (→ exclude natural). Never default to natural.
-• ITEM TYPE — ring / bracelet / necklace / pendant / earrings / watch / brooch, etc.
+• ITEM TYPE — ring / bracelet / necklace / pendant / earrings / watch / brooch, etc. These are DISTINCT and NOT interchangeable: a PENDANT (or charm) is NOT a necklace, and a necklace is NOT a pendant — do NOT return pendants for a "necklace" request, or necklaces for a "pendant" request. Likewise chain ≠ necklace unless clearly a finished necklace.
 • BRAND — e.g. Tiffany & Co., Cartier, Rolex, Grand Seiko (Grand Seiko is NOT Seiko).
 • PRIMARY GEMSTONE TYPE — diamond / sapphire / ruby / emerald / pearl, etc.
 • (Watches) DIAL COLOR.
@@ -220,7 +220,7 @@ export const BATCH_VERIFY_SYSTEM = `You are an expert jeweler doing a STRICT fin
 
 Apply attribute-by-attribute gating to EACH product:
 - Every attribute the customer SPECIFIES is an INDEPENDENT HARD requirement — the product must satisfy it or be match=false. Every attribute NOT specified is unconstrained (ignore it). ALL specified attributes must pass together (AND); a strong match on one never compensates for failing another.
-- Specifiable attributes: SETTING/form (cluster, solitaire, halo, three-stone, eternity, tennis, signet, pavé, channel-set, bezel, stud, hoop, huggie, riviera — MUTUALLY EXCLUSIVE: a halo incl. "hidden halo" is NOT a cluster; three-stone is NOT a cluster; bypass/five-stone/row is NOT a cluster; solitaire is NOT a cluster); METAL/TONE (see the rules below); DIAMOND/STONE ORIGIN (natural vs lab-grown); ITEM TYPE (ring/bracelet/necklace/pendant/earrings/watch...); BRAND (Grand Seiko ≠ Seiko); PRIMARY GEMSTONE TYPE; (watches) DIAL COLOR.
+- Specifiable attributes: SETTING/form (cluster, solitaire, halo, three-stone, eternity, tennis, signet, pavé, channel-set, bezel, stud, hoop, huggie, riviera — MUTUALLY EXCLUSIVE: a halo incl. "hidden halo" is NOT a cluster; three-stone is NOT a cluster; bypass/five-stone/row is NOT a cluster; solitaire is NOT a cluster); METAL/TONE (see the rules below); DIAMOND/STONE ORIGIN (natural vs lab-grown); ITEM TYPE (ring/bracelet/necklace/pendant/earrings/watch... — DISTINCT: a pendant/charm is NOT a necklace and vice versa); BRAND (Grand Seiko ≠ Seiko); PRIMARY GEMSTONE TYPE; (watches) DIAL COLOR.
 - ORIGIN is UNSPECIFIED unless the customer explicitly wrote "natural" or "lab"/"lab grown"/"lab-created"/"man-made". An unqualified "diamond"/"DIA" request must PASS both natural AND lab-grown items — never reject a lab-grown item (or a natural item) on origin when the customer didn't specify one.
 
 ${metalToneRules()}
