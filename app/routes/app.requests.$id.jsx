@@ -5,6 +5,7 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { sendNoteEmail } from "../lib/email.server";
 import { runMatchesForRequest } from "../lib/matchRunner.server";
+import { parseBudgetFromNotes } from "../lib/budget";
 
 export const loader = async ({ request, params }) => {
   const { session } = await authenticate.admin(request);
@@ -67,6 +68,31 @@ export const action = async ({ request, params }) => {
       });
       await runMatchesForRequest(null, req);
     }
+  }
+
+  if (act === "save-match-notes") {
+    // Save refinement notes and immediately re-run matching over the combined
+    // description + notes. Clearing `embedding` forces a re-embed from the new
+    // combined text; a budget stated in the notes updates the request budget.
+    const matchNotes = String(data.get("matchNotes") || "").trim() || null;
+    const parsedBudget = parseBudgetFromNotes(matchNotes);
+    const req = await prisma.request.findFirst({
+      where: { id: params.id, shop: session.shop },
+    });
+    if (req) {
+      const updated = await prisma.request.update({
+        where: { id: req.id },
+        data: {
+          matchNotes,
+          embedding: null,
+          matchState: "pending",
+          matchError: null,
+          ...(parsedBudget != null ? { budget: parsedBudget } : {}),
+        },
+      });
+      await runMatchesForRequest(null, updated);
+    }
+    return { notesSaved: true };
   }
 
   if (act === "decline-all") {
@@ -433,6 +459,70 @@ function NotesSection({ notes, salespersonName }) {
   );
 }
 
+/**
+ * Refinement notes that live-refine matching. Saving re-runs matching over the
+ * combined description + notes; the loader revalidates so the matched-products
+ * list below refreshes automatically. Shows an "updating…" state while it runs.
+ */
+function RefineMatching({ req }) {
+  const fetcher = useFetcher();
+  const [notes, setNotes] = useState(req.matchNotes || "");
+  const busy = fetcher.state !== "idle";
+  // Keep the field in sync if the server-updated notes differ (e.g. after save).
+  useEffect(() => {
+    if (fetcher.state === "idle" && fetcher.data?.notesSaved) {
+      // no-op: local text already reflects what was typed
+    }
+  }, [fetcher.state, fetcher.data]);
+
+  return (
+    <s-section heading="Refine matching">
+      <p style={{ fontSize: 13, color: "#6d7175", margin: "0 0 12px" }}>
+        Add details to narrow, broaden, or nudge matches — no new request needed.
+        Saving re-runs matching over the description <strong>plus</strong> these notes.
+        Examples: &ldquo;must be pear-shaped&rdquo;, &ldquo;any yellow tone is fine&rdquo;,
+        &ldquo;budget up to $8,000&rdquo;, &ldquo;prefers vintage&rdquo;.
+      </p>
+      <fetcher.Form method="post">
+        <input type="hidden" name="_action" value="save-match-notes" />
+        <textarea
+          name="matchNotes"
+          rows={3}
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          disabled={busy}
+          style={{ ...inputStyle, resize: "vertical", opacity: busy ? 0.7 : 1 }}
+          placeholder="e.g. must be pear-shaped; any yellow tone is fine; budget up to $8,000; prefers vintage"
+        />
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 10 }}>
+          <button
+            type="submit"
+            disabled={busy}
+            style={{
+              background: "#008060",
+              color: "#fff",
+              border: "none",
+              borderRadius: 6,
+              padding: "8px 20px",
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: busy ? "not-allowed" : "pointer",
+              opacity: busy ? 0.7 : 1,
+            }}
+          >
+            {busy ? "Updating matches…" : "Save & re-match"}
+          </button>
+          {busy && (
+            <span style={{ fontSize: 13, color: "#005bd3" }}>
+              ⏳ Re-evaluating inventory against the refined request…
+            </span>
+          )}
+        </div>
+      </fetcher.Form>
+    </s-section>
+  );
+}
+
 export default function RequestDetailPage() {
   const { req } = useLoaderData();
   const unreadCount = req.matches.filter((m) => !m.read).length;
@@ -601,6 +691,8 @@ export default function RequestDetailPage() {
           )}
         </div>
       </s-section>
+
+      <RefineMatching req={req} />
 
       <s-section
         heading={`Matched products (${req.matches.length}${

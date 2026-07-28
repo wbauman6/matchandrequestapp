@@ -131,6 +131,7 @@ export const loader = async ({ request }) => {
     id: r.id,
     customerName: r.customerName,
     description: r.description,
+    matchNotes: r.matchNotes,
     budget: r.budget,
     salespersonName: r.salespersonName,
     status: r.status,

@@ -59,6 +59,10 @@ function Modal() {
   const [actionBusy, setActionBusy] = useState(null); // e.g. "req:<id>" | "match:<id>"
   const [actionError, setActionError] = useState("");
 
+  // Refinement notes (live-refine matching).
+  const [notesDraft, setNotesDraft] = useState("");
+  const [refining, setRefining] = useState(false);
+
   // Customer picker (search Shopify customers by name/email/phone).
   const [customer, setCustomer] = useState(null);
   const [custQuery, setCustQuery] = useState("");
@@ -192,8 +196,36 @@ function Modal() {
   const openRequest = (r) => {
     setActionError("");
     setDetailReq(r);
+    setNotesDraft(r.matchNotes || "");
     setView("detail");
   };
+
+  // Save refinement notes and re-run matching. Shows an "updating…" state, then
+  // swaps in the refreshed request (matches added/removed per the new notes).
+  async function saveNotes(r) {
+    setRefining(true);
+    setActionError("");
+    try {
+      const res = await fetch(`/api/pos/requests/${r.id}`, {
+        method: "POST",
+        headers: await authHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ _action: "save-notes", matchNotes: notesDraft }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.error || !data.ok) {
+        throw new Error(data.error || `Server returned ${res.status}`);
+      }
+      if (data.request) {
+        setDetailReq(data.request);
+        setNotesDraft(data.request.matchNotes || "");
+      }
+      loadRequests();
+    } catch (err) {
+      setActionError(String(err?.message || err));
+    } finally {
+      setRefining(false);
+    }
+  }
 
   // Mark a request fulfilled — same status change the admin app makes. On success
   // the request leaves the active list, so return home and refresh.
@@ -406,7 +438,32 @@ function Modal() {
                 <s-text tone="critical">{actionError}</s-text>
               ) : null}
 
-              {r.matches.length === 0 ? (
+              {/* Refine matching — narrow, broaden, or nudge without a new request */}
+              <s-stack direction="block" gap="small">
+                <s-text-area
+                  label="Refine matching (notes)"
+                  value={notesDraft}
+                  rows={3}
+                  disabled={refining}
+                  details="Add details to narrow, broaden, or nudge matches. Saving re-runs matching. e.g. 'must be pear-shaped', 'any yellow tone is fine', 'budget up to $8,000', 'prefers vintage'."
+                  onInput={(e) => setNotesDraft(e.currentTarget.value)}
+                />
+                <s-button
+                  variant="primary"
+                  loading={refining}
+                  onClick={() => saveNotes(r)}
+                >
+                  {refining ? "Updating matches…" : "Save & re-match"}
+                </s-button>
+                {refining ? (
+                  <s-stack direction="inline" gap="small" alignItems="center">
+                    <s-spinner accessibilityLabel="Updating matches" />
+                    <s-text>Re-evaluating inventory against the refined request…</s-text>
+                  </s-stack>
+                ) : null}
+              </s-stack>
+
+              {refining ? null : r.matches.length === 0 ? (
                 <s-stack direction="block" gap="small">
                   <s-banner tone="info" heading="Not in stock yet — watching" />
                   <s-text>

@@ -301,12 +301,14 @@ export async function drainProductQueue(shop, { force = false } = {}) {
         }
 
         const reasoningText = normalizeRequestTerms(request.description || "");
+        const notesText = normalizeRequestTerms(request.matchNotes || "");
         for (let i = 0; i < candidates.length; i += CHUNK) {
           const chunk = candidates.slice(i, i + CHUNK);
           let matches;
           try {
             matches = await reasonMatches({
               description: reasoningText,
+              notes: notesText,
               budget: null, // budget is a soft ranking factor, never an AI gate
               candidates: chunk,
             });
@@ -314,6 +316,7 @@ export async function drainProductQueue(shop, { force = false } = {}) {
               const cById = new Map(chunk.map((c) => [c.productId, c]));
               const pass = await verifyBatch({
                 description: reasoningText,
+                notes: notesText,
                 candidates: matches.map((m) => cById.get(m.productId)).filter(Boolean),
               });
               matches = matches.filter((m) => pass.has(m.productId));

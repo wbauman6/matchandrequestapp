@@ -138,8 +138,10 @@ async function runMatchesInner(request, reqVec) {
 
   // Step 3 — AI reasoning pass. Jeweler terms in the request (DIA, WG, GS,
   // "diamond by the yard", …) are normalized so the AI gates on the same
-  // canonical words the embedding was built from.
+  // canonical words the embedding was built from. Refinement notes are passed
+  // separately so the AI can interpret their intent (add / relax / prefer).
   const reasoningText = normalizeRequestTerms(request.description || "");
+  const notesText = normalizeRequestTerms(request.matchNotes || "");
   const candidates = pool.map((p) => ({
     productId: p.productId,
     title: p.title,
@@ -150,6 +152,7 @@ async function runMatchesInner(request, reqVec) {
   // a soft ranking factor handled here, never an AI gate.
   let matches = await reasonMatches({
     description: reasoningText,
+    notes: notesText,
     budget: null,
     candidates,
   });
@@ -160,6 +163,7 @@ async function runMatchesInner(request, reqVec) {
     const cById = new Map(candidates.map((c) => [c.productId, c]));
     const pass = await verifyBatch({
       description: reasoningText,
+      notes: notesText,
       candidates: matches.map((m) => cById.get(m.productId)).filter(Boolean),
     });
     matches = matches.filter((m) => pass.has(m.productId));
@@ -172,9 +176,11 @@ async function runMatchesInner(request, reqVec) {
 
   const byId = new Map(pool.map((r) => [r.productId, r]));
   const ops = [];
+  const keptIds = new Set();
   for (const m of matches) {
     const p = byId.get(m.productId);
     if (!p) continue;
+    keptIds.add(m.productId);
     const overBudget = isOverBudget(request.budget, p.price);
     const needsReview = m.confidence !== "high";
     ops.push(
@@ -188,6 +194,19 @@ async function runMatchesInner(request, reqVec) {
     );
   }
   await Promise.all(ops);
+
+  // Reconcile: re-running (e.g. after a refinement note narrowed the request)
+  // must REMOVE previously-surfaced matches that no longer qualify. Delete this
+  // request's non-declined matches that aren't in the new set. (Declined stay
+  // declined so a rejected item never resurfaces.)
+  await prisma.match.deleteMany({
+    where: {
+      requestId: request.id,
+      declined: false,
+      productId: { notIn: keptIds.size ? [...keptIds] : ["__none__"] },
+    },
+  });
+
   // Matching completed successfully — even if zero matches (a genuine "watching"
   // state, NOT an error).
   await setMatchState(request.id, "ok");

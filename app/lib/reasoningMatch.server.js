@@ -49,6 +49,15 @@ async function withRetry(fn, { tries = 3, base = 600, label = "op" } = {}) {
   throw lastErr;
 }
 
+// How the AI folds later "Refinement notes" into the request. Shared by the
+// reasoning and verify prompts so both apply the same add/relax/prefer logic.
+const NOTES_INTERPRETATION = `REFINEMENT NOTES:
+The request may be followed by "Refinement notes" — later clarifications the salesperson added. Fold them into the SAME request; when a note conflicts with the original wording, THE NOTE WINS. Interpret each note's intent:
+- ADDS / NARROWS a requirement (e.g. "must be pear-shaped", "platinum only", "no halo"): treat it as a NEW hard gate — exclude any candidate that fails it, exactly like an originally-specified attribute.
+- RELAXES / BROADENS a constraint (e.g. "any yellow tone is fine", "white gold or platinum ok", "any diamond shape"): LOOSEN the matching gate accordingly, OVERRIDING the stricter original wording. Example: original "yellow gold" + note "any yellow tone is fine" → switch from the strict yellow-GOLD metal gate to the broad yellow-TONE gate (accept yellow gold, gold-plated/YGP, and yellow-toned pieces).
+- SOFT PREFERENCE (e.g. "prefers vintage", "she likes bezel settings", "ideally understated"): NOT a gate. Use it ONLY to rank — give preferred items higher confidence — and NEVER exclude a candidate merely for lacking a soft preference.
+A budget mentioned in a note is applied to the price filter outside this prompt — do not treat budget as an attribute gate.`;
+
 export const SYSTEM = `You are an expert jeweler matching a customer's special-order request against candidate inventory. You are given the request and a list of candidate products (title + description). Return ONLY the candidates that genuinely satisfy the request, applying STRICT attribute-by-attribute gating. This single pass is the final decision — be as rigorous per item as if you were checking each one individually.
 
 ATTRIBUTE-BY-ATTRIBUTE GATING:
@@ -68,6 +77,8 @@ Attributes (check only those the customer actually specified):
 ${metalToneRules()}
 
 Do NOT over-apply vague/aesthetic terms ("elegant", "classic", "dainty") — those shade ranking, they are not gates.
+
+${NOTES_INTERPRETATION}
 
 ${relatedTermsGuidance()}
 
@@ -104,7 +115,7 @@ function parseJsonObject(raw) {
  * can record an error state (and never mistake a transient failure for "0 in
  * stock"). Returns [] only when there's no client/candidates (a real empty).
  */
-export async function reasonMatches({ description, budget, candidates }) {
+export async function reasonMatches({ description, notes, budget, candidates }) {
   const c = getClient();
   if (!c || !candidates?.length) return [];
 
@@ -123,7 +134,7 @@ export async function reasonMatches({ description, budget, candidates }) {
   }));
 
   const user = `Customer request: "${description}"
-Budget: ${budget != null ? "$" + budget : "not specified"}
+${notes ? `Refinement notes (apply per REFINEMENT NOTES): "${notes}"\n` : ""}Budget: ${budget != null ? "$" + budget : "not specified"}
 
 Candidate products (${list.length}):
 ${JSON.stringify(list)}
@@ -172,6 +183,8 @@ Apply attribute-by-attribute gating to EACH product:
 
 ${metalToneRules()}
 
+${NOTES_INTERPRETATION}
+
 Respond with ONLY a JSON object (begin with "{", no other text) giving a verdict for EVERY product id provided:
 {"results":[{"product_id":"<id>","match":true|false,"reason":"one short sentence"}]}`;
 
@@ -180,7 +193,7 @@ Respond with ONLY a JSON object (begin with "{", no other text) giving a verdict
  * strict attribute+setting gating as the per-item pass). Returns a Set of
  * productIds that PASS. On failure returns all ids (don't drop on transient error).
  */
-export async function verifyBatch({ description, candidates }) {
+export async function verifyBatch({ description, notes, candidates }) {
   const c = getClient();
   const allIds = new Set((candidates || []).map((p) => p.productId));
   if (!c || !candidates?.length) return allIds;
@@ -190,7 +203,7 @@ export async function verifyBatch({ description, candidates }) {
     description: normalizeProductTerms(p.description || ""), // full description — see reasonMatches note
   }));
   const user = `Customer request: "${description}"
-
+${notes ? `Refinement notes (apply per REFINEMENT NOTES): "${notes}"\n` : ""}
 Products to check (${list.length}):
 ${JSON.stringify(list)}
 

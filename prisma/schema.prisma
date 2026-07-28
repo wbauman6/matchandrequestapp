@@ -36,6 +36,11 @@ model Request {
   salespersonName  String
   salespersonEmail String
   description      String?
+  // Free-text refinements a salesperson adds AFTER creation to narrow, broaden,
+  // or nudge matching (e.g. "must be pear-shaped", "any yellow tone is fine",
+  // "prefers vintage"). Folded into the SAME request picture as the description
+  // for embedding + reasoning; saving it re-runs matching. See runMatchesForRequest.
+  matchNotes       String?
   keywords         String[]
   budget           Float?
   customerId       String?

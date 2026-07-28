@@ -35,3 +35,36 @@ export function isOverBudget(budget, price) {
   if (!budget || price == null) return false;
   return price > budget && price <= budgetCeiling(budget);
 }
+
+// Extract a new budget from a refinement note. Handles "$8,000", "budget up to
+// $8,000", "raise budget to 8k", "under $5000", "max 3000". Returns the number,
+// or null if the note has no clear budget instruction. Deliberately
+// conservative to avoid false positives: a bare "8k" is NOT read as a budget
+// (it may be "14k gold"), and "under 1 carat" is NOT read as a $1 budget — a
+// budget needs either a currency "$" or a budget cue word, and a plausibly
+// budget-sized amount.
+export function parseBudgetFromNotes(notes) {
+  if (!notes) return null;
+  const text = String(notes);
+
+  // 1) Explicit currency (optionally with "k") — unambiguous.
+  let m = text.match(/\$\s*([\d,]+(?:\.\d+)?)\s*(k)?/i);
+  if (m) {
+    let n = parseFloat(m[1].replace(/,/g, ""));
+    if (m[2]) n *= 1000;
+    return Number.isFinite(n) && n > 0 ? n : null;
+  }
+
+  // 2) Budget cue word + amount. The cue disambiguates "budget 8k" from
+  //    "14k gold"; without an explicit "k", require ≥ 100 so a size/quantity
+  //    ("under 1 carat", "max 5 stones") isn't mistaken for a budget.
+  m = text.match(/(?:budget|up ?to|under|below|max(?:imum)?|spend)\s*(?:of|to|is|:)?\s*\$?\s*([\d,]+(?:\.\d+)?)\s*(k)?/i);
+  if (m) {
+    let n = parseFloat(m[1].replace(/,/g, ""));
+    if (!Number.isFinite(n)) return null;
+    if (m[2]) n *= 1000;
+    else if (n < 100) return null;
+    return n > 0 ? n : null;
+  }
+  return null;
+}

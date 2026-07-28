@@ -35,9 +35,13 @@ export function buildProductText(product) {
 }
 
 export function buildRequestText(request) {
-  // Strip marketing filler + normalize brand shorthand so the embedding focuses
+  // Fold refinement notes into the SAME request picture as the description, so
+  // the retrieval vector reflects the refined request (e.g. description
+  // "diamond ring" + note "must be pear-shaped" → embeds the pear-shaped intent).
+  const combined = [request.description || "", request.matchNotes || ""].filter(Boolean).join(". ");
+  // Strip marketing filler + normalize jeweler terms so the embedding focuses
   // on the meaningful terms (brand, item type, attributes).
-  const desc = cleanRequestText(request.description || "");
+  const desc = cleanRequestText(combined);
   const kws = (request.keywords || []).join(", ");
   return [desc, kws].filter(Boolean).join(". ").slice(0, MAX_EMBED_CHARS);
 }
