@@ -148,10 +148,49 @@ model MatchEval {
   productId   String
   productHash String
   matched     Boolean
+  // "ok"    — the pair was fully evaluated (a zero-match request whose pairs are
+  //           all "ok" is provably "evaluated, nothing qualified").
+  // "error" — evaluation was attempted but errored; retried next run (dedupe
+  //           skips only "ok" pairs, so errored pairs are re-evaluated).
+  status      String   @default("ok")
+  error       String?
+  updatedAt   DateTime @default(now()) @updatedAt
   createdAt   DateTime @default(now())
 
   @@unique([requestId, productId])
   @@index([shop, productId])
+  @@index([shop, status])
+}
+
+// Audit record for one weekly-drop run (Tuesday 4 PM ET). Proves what was
+// detected, embedded, evaluated, and matched — and lists every failure — so a
+// zero-match outcome is never confused with a silent failure. Surfaced in the
+// admin app and emailed on failure. `coverageThrough` is the watermark: the
+// next run detects every product changed at/after the last OK run's watermark.
+model DropRun {
+  id                String    @id @default(cuid())
+  shop              String
+  status            String    @default("running") // running | ok | partial | failed
+  trigger           String    @default("cron") // cron | manual | webhook
+  since             DateTime? // watermark this run covered FROM
+  coverageThrough   DateTime? // watermark this run advances TO (its start), set when ok
+  productsDetected  Int       @default(0)
+  productsEmbedded  Int       @default(0)
+  embedFailures     Int       @default(0)
+  activeRequests    Int       @default(0)
+  evalsAttempted    Int       @default(0)
+  evalsCompleted    Int       @default(0)
+  evalErrors        Int       @default(0)
+  matchesCreated    Int       @default(0)
+  queueRemaining    Int       @default(0)
+  // Human-readable failure/skip list + notes for the audit report.
+  failures          Json?
+  note              String?
+  startedAt         DateTime  @default(now())
+  finishedAt        DateTime?
+
+  @@index([shop, startedAt])
+  @@index([shop, status])
 }
 
 // Instant-ack webhook queue: products/create|update handlers upsert a row here

@@ -166,3 +166,53 @@ export async function sendDigestEmail({ salespersonName, salespersonEmail, entri
     html,
   });
 }
+
+/**
+ * Weekly-drop failure alert — sent when a drop run finishes "partial" or
+ * "failed" (NOT the routine digest). Loud, with the audit numbers and the
+ * failure list, so a silent zero-match run can never hide a real failure.
+ *
+ * to: array of recipient emails (admins). audit/failures from the DropRun.
+ */
+export async function sendDropAlertEmail({ shop, status, audit = {}, failures = [], note, to }) {
+  const recipients = (to || []).filter(Boolean);
+  if (recipients.length === 0) return;
+  const appUrl = `https://${shop}/admin/apps/${process.env.SHOPIFY_API_KEY}/app/drops`;
+  const tone = status === "failed" ? "#d72c0d" : "#a85100";
+  const row = (k, v) => `<tr><td style="padding:6px 12px;border-bottom:1px solid #eee;color:#6d7175;">${k}</td><td style="padding:6px 12px;border-bottom:1px solid #eee;font-weight:600;text-align:right;">${v}</td></tr>`;
+  const failLines = failures.length
+    ? `<ul style="margin:8px 0;padding-left:20px;font-size:13px;color:#414547;">${failures.map((f) => `<li>${[f.stage, f.note || f.error, f.productId].filter(Boolean).join(" — ")}</li>`).join("")}</ul>`
+    : "<p style='font-size:13px;color:#6d7175;'>No itemized failures recorded.</p>";
+
+  const html = shell(`
+    ${header(`⚠ Weekly drop ${status.toUpperCase()}`)}
+    <div style="padding:24px 32px;">
+      <p style="margin:0 0 12px;font-size:15px;color:${tone};font-weight:600;">
+        The Tuesday inventory-drop match run finished <strong>${status}</strong>${note ? ` — ${note}` : ""}.
+      </p>
+      <p style="margin:0 0 16px;font-size:14px;">This is NOT a "nothing matched" result — something needs attention. Anything unfinished is retried on the next run, but review it:</p>
+      <table style="width:100%;border-collapse:collapse;margin-bottom:16px;font-size:14px;">
+        ${row("Products detected", audit.productsDetected ?? "—")}
+        ${row("Embedded this run", audit.productsEmbedded ?? "—")}
+        ${row("Embedding failures", audit.embedFailures ?? "—")}
+        ${row("Active requests", audit.activeRequests ?? "—")}
+        ${row("Evaluations attempted", audit.evalsAttempted ?? "—")}
+        ${row("Evaluations completed", audit.evalsCompleted ?? "—")}
+        ${row("Evaluation errors", audit.evalErrors ?? "—")}
+        ${row("New matches created", audit.matchesCreated ?? "—")}
+        ${row("Queue remaining", audit.queueRemaining ?? "—")}
+      </table>
+      <strong style="font-size:13px;">Failures / skips:</strong>
+      ${failLines}
+      <a href="${appUrl}" style="display:inline-block;margin-top:16px;background:#008060;color:#fff;text-decoration:none;padding:12px 24px;border-radius:6px;font-weight:600;font-size:14px;">View drop report →</a>
+    </div>
+    ${footer()}`);
+
+  const resend = getClient();
+  await resend.emails.send({
+    from: FROM,
+    to: recipients,
+    subject: `⚠ Weekly drop ${status} — ${audit.matchesCreated ?? 0} matches, ${(audit.embedFailures ?? 0) + (audit.evalErrors ?? 0)} failures`,
+    html,
+  });
+}

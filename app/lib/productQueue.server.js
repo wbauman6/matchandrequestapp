@@ -219,7 +219,15 @@ async function ensureProductEmbedding(shop, product) {
  * (manual /api/drain-queue only) to override.
  */
 export async function drainProductQueue(shop, { force = false } = {}) {
-  const stats = { processed: 0, matched: 0, aborted: false };
+  const stats = {
+    processed: 0,
+    matched: 0,
+    aborted: false,
+    embedFailures: 0, // products that couldn't be embedded this drain
+    evalsAttempted: 0, // (request × product) pairs sent to the AI
+    evalsCompleted: 0, // pairs that finished evaluation (matched or not)
+    evalErrors: 0, // pairs whose evaluation errored (recorded, retried next run)
+  };
   if (!force && !isDropWindow()) return { ...stats, skipped: "outside weekly drop window" };
   if (!hasEmbeddingKey() || !process.env.ANTHROPIC_API_KEY) return stats; // leave queued
   if (!(await acquireDrainLock(shop))) return stats; // another worker is on it
@@ -260,11 +268,12 @@ export async function drainProductQueue(shop, { force = false } = {}) {
       const failedIds = new Set(); // queue row ids to retry later
 
       // 1) Embeddings (only re-embeds when the product text actually changed).
+      // A failure keeps the row queued to retry — never silently skipped.
       const prodInfo = new Map(); // productId -> { vec, hash }
       for (const { row, product } of items) {
         const info = await ensureProductEmbedding(shop, product);
         if (info) prodInfo.set(product.id, info);
-        else failedIds.add(row.id);
+        else { failedIds.add(row.id); stats.embedFailures++; }
       }
 
       // 2) Cheap gates in bulk: existing matches + already-reasoned pairs.
@@ -279,9 +288,14 @@ export async function drainProductQueue(shop, { force = false } = {}) {
       const known = new Set(existing.map((m) => `${m.requestId}|${m.productId}`));
       const evals = await prisma.matchEval.findMany({
         where: { shop, productId: { in: productIds } },
-        select: { requestId: true, productId: true, productHash: true },
+        select: { requestId: true, productId: true, productHash: true, status: true },
       });
-      const evalHash = new Map(evals.map((e) => [`${e.requestId}|${e.productId}`, e.productHash]));
+      // Dedupe skips ONLY pairs already evaluated OK at this exact product
+      // version. An errored pair (status "error") or a new version is re-evaluated
+      // — so an error never permanently suppresses a pair.
+      const okEvalHash = new Map(
+        evals.filter((e) => e.status === "ok").map((e) => [`${e.requestId}|${e.productId}`, e.productHash]),
+      );
 
       // 3) Per request: gate → chunked batched reasoning → batched verify.
       for (const request of requests) {
@@ -294,7 +308,7 @@ export async function drainProductQueue(shop, { force = false } = {}) {
           if (!info || failedIds.has(row.id)) continue;
           const key = `${request.id}|${product.id}`;
           if (known.has(key)) continue; // already matched
-          if (evalHash.get(key) === info.hash) continue; // already reasoned, unchanged
+          if (okEvalHash.get(key) === info.hash) continue; // already reasoned OK, unchanged
           if (!withinBudget(request.budget, product.price)) continue;
           const sim = cosineSimilarity(reqVec, info.vec);
           if (sim < RETRIEVAL_GATE) continue;
@@ -305,6 +319,7 @@ export async function drainProductQueue(shop, { force = false } = {}) {
         const notesText = normalizeRequestTerms(request.matchNotes || "");
         for (let i = 0; i < candidates.length; i += CHUNK) {
           const chunk = candidates.slice(i, i + CHUNK);
+          stats.evalsAttempted += chunk.length;
           let matches;
           try {
             matches = await reasonMatches({
@@ -335,23 +350,41 @@ export async function drainProductQueue(shop, { force = false } = {}) {
               stats.aborted = true;
               return stats;
             }
-            // Transient chunk failure (already retried): retry these rows next drain.
+            // Transient chunk failure (already retried inside reason/verify):
+            // record each pair as status "error" (provably ATTEMPTED, not
+            // "never evaluated") and keep the rows queued so they retry next
+            // drain. The dedupe skips only "ok" pairs, so these WILL be redone.
             console.error("[drain] chunk failed for request", request.id, err?.message || err);
+            stats.evalErrors += chunk.length;
+            const emsg = String(err?.message || err).slice(0, 300);
+            await Promise.all(
+              chunk.map((c) =>
+                prisma.matchEval
+                  .upsert({
+                    where: { requestId_productId: { requestId: request.id, productId: c.productId } },
+                    update: { productHash: c._hash, matched: false, status: "error", error: emsg },
+                    create: { shop, requestId: request.id, productId: c.productId, productHash: c._hash, matched: false, status: "error", error: emsg },
+                  })
+                  .catch(() => {}),
+              ),
+            );
             for (const c of chunk) failedIds.add(c._rowId);
             continue;
           }
+          stats.evalsCompleted += chunk.length;
 
           const accepted = new Map(matches.map((m) => [m.productId, m]));
           const dbOps = [];
           for (const c of chunk) {
             const m = accepted.get(c.productId);
-            // Record every judged pair (accept AND reject) so this product
-            // version is never re-reasoned for this request.
+            // Record every judged pair (accept AND reject), status "ok", so this
+            // product version is never re-reasoned for this request and a
+            // zero-match request is provably "evaluated, nothing qualified".
             dbOps.push(
               prisma.matchEval.upsert({
                 where: { requestId_productId: { requestId: request.id, productId: c.productId } },
-                update: { productHash: c._hash, matched: !!m },
-                create: { shop, requestId: request.id, productId: c.productId, productHash: c._hash, matched: !!m },
+                update: { productHash: c._hash, matched: !!m, status: "ok", error: null },
+                create: { shop, requestId: request.id, productId: c.productId, productHash: c._hash, matched: !!m, status: "ok" },
               }),
             );
             if (m) {
