@@ -35,7 +35,7 @@ async function withRetry(fn, { tries = 3, base = 600, label = "op" } = {}) {
   let lastErr;
   for (let i = 0; i < tries; i++) {
     try {
-      return await fn();
+      return await fn(i); // attempt index → callers raise temperature on retry
     } catch (err) {
       lastErr = err;
       if (!isRetryable(err)) throw err;
@@ -84,6 +84,12 @@ ${relatedTermsGuidance()}
 
 For EACH candidate: exclude it if it fails ANY specified attribute; otherwise include it. Rank included matches high → medium → low by overall fit.
 
+CONFIDENCE (differentiate — do NOT flatten): among candidates that pass every specified gate, spread the confidence to reflect real fit quality:
+- "high" — an excellent, unambiguous fit: satisfies the gates AND aligns with the request's evident intent and any soft preferences; the piece you'd show first.
+- "medium" — a genuine, valid match that is a weaker overall fit: satisfies all gates but is plainer than implied, misses a soft preference, or is borderline on a non-gated dimension.
+- "low" — technically satisfies the gates but is a marginal/edge fit you'd show last.
+Do NOT mark everything "high". A realistic result set spreads across high/medium/low; reserve "high" for the genuinely best fits.
+
 ZERO MATCHES IS A VALID, CORRECT ANSWER. If NO candidate passes every specified attribute, return an EMPTY matches array. NEVER substitute across a specified attribute (e.g. never return a natural-diamond ring for a lab-grown request, or a white-gold ring for a yellow-gold request) just to avoid an empty result. Never include a candidate that fails a specified attribute gate.
 
 CRITICAL OUTPUT RULE: Respond with ONLY the JSON object — no preamble, no analysis, no per-candidate commentary, no markdown fences. Begin with "{" and output nothing but the JSON (an empty result is exactly {"matches":[]}):
@@ -105,6 +111,38 @@ function parseJsonObject(raw) {
   } catch {
     return null;
   }
+}
+
+// Salvage: walk a (possibly malformed) response and extract each top-level
+// {...} object after `"key":[`, parsing them individually. One item with a bad
+// character no longer discards the whole array — we keep every item that parses.
+function salvageItems(raw, key) {
+  if (!raw) return [];
+  const m = raw.match(new RegExp(`"${key}"\\s*:\\s*\\[`));
+  if (!m) return [];
+  const body = raw.slice(m.index + m[0].length);
+  const items = [];
+  let depth = 0, start = -1, inStr = false, esc = false;
+  for (let i = 0; i < body.length; i++) {
+    const ch = body[i];
+    if (esc) { esc = false; continue; }
+    if (ch === "\\") { esc = true; continue; }
+    if (ch === '"') inStr = !inStr;
+    if (inStr) continue;
+    if (ch === "{") { if (depth === 0) start = i; depth++; }
+    else if (ch === "}") { depth--; if (depth === 0 && start >= 0) { try { items.push(JSON.parse(body.slice(start, i + 1))); } catch { /* skip bad item */ } start = -1; } }
+    else if (ch === "]" && depth === 0) break; // end of the array
+  }
+  return items;
+}
+
+// Parse `{ [key]: [...] }`, salvaging individual items if the whole object won't
+// parse. Returns { [key]: [...] } or null if nothing usable was found.
+function parseItemList(raw, key) {
+  const obj = parseJsonObject(raw);
+  if (obj && Array.isArray(obj[key])) return obj;
+  const items = salvageItems(raw, key);
+  return items.length ? { [key]: items } : null;
 }
 
 /**
@@ -142,16 +180,20 @@ ${JSON.stringify(list)}
 Return the JSON verdict now.`;
 
   const parsed = await withRetry(
-    async () => {
+    async (attempt) => {
       await trackAiCall(); // daily cost kill switch — throws when over budget
       const resp = await c.messages.create({
         model: MODEL,
         max_tokens: 8000,
+        // First attempt deterministic (same request, any word order → same
+        // result); retries use a small temperature so a rare malformed/
+        // unparseable response can actually recover instead of repeating.
+        temperature: attempt === 0 ? 0 : 0.4,
         system: SYSTEM,
         messages: [{ role: "user", content: user }],
       });
       const raw = resp.content?.[0]?.type === "text" ? resp.content[0].text : "";
-      const obj = parseJsonObject(raw);
+      const obj = parseItemList(raw, "matches");
       if (!obj || !Array.isArray(obj.matches)) {
         // Truncated (stop_reason "max_tokens") or non-JSON output — retry rather
         // than silently returning an empty (false "no matches") result.
@@ -210,16 +252,17 @@ ${JSON.stringify(list)}
 Return a verdict for every product id. Return the JSON now.`;
   try {
     const parsed = await withRetry(
-      async () => {
+      async (attempt) => {
         await trackAiCall(); // daily cost kill switch — throws when over budget
         const resp = await c.messages.create({
           model: VERIFY_MODEL,
           max_tokens: 8000, // room for a verdict per candidate up to the retrieval ceiling
+          temperature: attempt === 0 ? 0 : 0.4, // deterministic first, recover on retry
           system: BATCH_VERIFY_SYSTEM,
           messages: [{ role: "user", content: user }],
         });
         const raw = resp.content?.[0]?.type === "text" ? resp.content[0].text : "";
-        const obj = parseJsonObject(raw);
+        const obj = parseItemList(raw, "results");
         if (!obj || !Array.isArray(obj.results)) {
           throw new Error(`unparseable verify response (stop=${resp.stop_reason})`);
         }
@@ -245,6 +288,19 @@ Return a verdict for every product id. Return the JSON now.`;
 // Map confidence to a 0-100 score for storage/sorting/display.
 export function confidenceToScore(confidence) {
   return confidence === "high" ? 90 : confidence === "medium" ? 60 : 35;
+}
+
+// Blended score: the AI's confidence tier sets the band, and the retrieval
+// similarity spreads items WITHIN and across bands so scores genuinely vary and
+// rank meaningfully (instead of every match collapsing onto one number). `sim`
+// is cosine similarity (~0.42–0.72 in practice) or undefined.
+export function blendedScore(confidence, sim) {
+  const s = typeof sim === "number" && Number.isFinite(sim)
+    ? Math.max(0, Math.min(1, (sim - 0.42) / (0.72 - 0.42)))
+    : 0.5;
+  const [lo, hi] =
+    confidence === "high" ? [72, 100] : confidence === "medium" ? [46, 74] : [22, 50];
+  return Math.round(lo + (hi - lo) * s);
 }
 
 // The verification pass enforces nuanced rules (setting gates hard, but

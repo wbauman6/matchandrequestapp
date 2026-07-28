@@ -5,7 +5,7 @@ import {
   hasEmbeddingKey,
 } from "./embeddings.server.js";
 import { normalizeRequestTerms } from "./jewelryTerms.js";
-import { reasonMatches, verifyBatch, confidenceToScore } from "./reasoningMatch.server.js";
+import { reasonMatches, verifyBatch, blendedScore } from "./reasoningMatch.server.js";
 import { isOverBudget, budgetCeiling } from "./budget.js";
 import { applyDynamicCap, RETRIEVAL_CEILING } from "./retrievalConfig.js";
 
@@ -185,7 +185,7 @@ async function runMatchesInner(request, reqVec) {
     const needsReview = m.confidence !== "high";
     ops.push(
       upsertMatch(request.shop, request, p, {
-        score: confidenceToScore(m.confidence),
+        score: blendedScore(m.confidence, p.sim),
         confidence: m.confidence,
         reason: m.reason,
         needsReview,

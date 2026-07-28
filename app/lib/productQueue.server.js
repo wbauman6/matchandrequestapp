@@ -6,7 +6,7 @@ import {
   textHash,
   hasEmbeddingKey,
 } from "./embeddings.server.js";
-import { reasonMatches, verifyBatch, confidenceToScore } from "./reasoningMatch.server.js";
+import { reasonMatches, verifyBatch, blendedScore } from "./reasoningMatch.server.js";
 import { getRequestEmbedding } from "./matchRunner.server.js";
 import { normalizeRequestTerms } from "./jewelryTerms.js";
 import { withinBudget, isOverBudget } from "./budget.js";
@@ -296,8 +296,9 @@ export async function drainProductQueue(shop, { force = false } = {}) {
           if (known.has(key)) continue; // already matched
           if (evalHash.get(key) === info.hash) continue; // already reasoned, unchanged
           if (!withinBudget(request.budget, product.price)) continue;
-          if (cosineSimilarity(reqVec, info.vec) < RETRIEVAL_GATE) continue;
-          candidates.push({ productId: product.id, title: product.title, description: product.description, price: product.price, _rowId: row.id, _hash: info.hash, _image: product.image });
+          const sim = cosineSimilarity(reqVec, info.vec);
+          if (sim < RETRIEVAL_GATE) continue;
+          candidates.push({ productId: product.id, title: product.title, description: product.description, price: product.price, _rowId: row.id, _hash: info.hash, _image: product.image, _sim: sim });
         }
 
         const reasoningText = normalizeRequestTerms(request.description || "");
@@ -356,12 +357,13 @@ export async function drainProductQueue(shop, { force = false } = {}) {
             if (m) {
               const overBudget = isOverBudget(request.budget, c.price);
               const needsReview = m.confidence !== "high";
+              const score = blendedScore(m.confidence, c._sim);
               stats.matched++;
               dbOps.push(
                 prisma.match.upsert({
                   where: { requestId_productId: { requestId: request.id, productId: c.productId } },
-                  update: { score: confidenceToScore(m.confidence), confidence: m.confidence, reasoning: m.reason, needsReview, overBudget, productTitle: c.title, productPrice: c.price, productImage: c._image },
-                  create: { shop, requestId: request.id, productId: c.productId, productTitle: c.title, productPrice: c.price, productImage: c._image, score: confidenceToScore(m.confidence), confidence: m.confidence, reasoning: m.reason, needsReview, overBudget, matchedKeywords: [], declined: false },
+                  update: { score, confidence: m.confidence, reasoning: m.reason, needsReview, overBudget, productTitle: c.title, productPrice: c.price, productImage: c._image },
+                  create: { shop, requestId: request.id, productId: c.productId, productTitle: c.title, productPrice: c.price, productImage: c._image, score, confidence: m.confidence, reasoning: m.reason, needsReview, overBudget, matchedKeywords: [], declined: false },
                 }),
               );
             }
