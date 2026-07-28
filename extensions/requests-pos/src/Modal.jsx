@@ -582,28 +582,37 @@ function Modal() {
                 </s-stack>
               ) : (
                 <s-stack direction="block" gap="small">
-                  <s-text-field
-                    label="Customer (search name, email, or phone)"
+                  <s-text>Customer</s-text>
+                  <s-search-field
+                    placeholder="Search name, email, or phone"
                     value={custQuery}
-                    placeholder="Jane, jane@email.com, or 555-1234"
                     onInput={(e) => setCustQuery(e.currentTarget.value)}
                   />
                   {custSearching ? <s-text>Searching…</s-text> : null}
                   {custError ? <s-text tone="critical">{custError}</s-text> : null}
-                  {custResults.map((c) => (
-                    <s-clickable onClick={() => selectCustomer(c)}>
-                      <s-box padding="small">
-                        <s-stack direction="block" gap="small">
-                          <s-text>{c.name}</s-text>
-                          {c.email || c.phone ? (
-                            <s-text>
-                              {[c.email, c.phone].filter(Boolean).join(" · ")}
-                            </s-text>
-                          ) : null}
-                        </s-stack>
-                      </s-box>
-                    </s-clickable>
-                  ))}
+                  {custResults.length > 0 ? (
+                    <s-section heading="Select a customer">
+                      {custResults.flatMap((c, i) => {
+                        const row = (
+                          <s-clickable key={c.id} onClick={() => selectCustomer(c)}>
+                            <s-box padding="base">
+                              <s-stack direction="block" gap="small">
+                                <s-text>{c.name}</s-text>
+                                {c.email || c.phone ? (
+                                  <s-text>
+                                    {[c.email, c.phone].filter(Boolean).join(" · ")}
+                                  </s-text>
+                                ) : null}
+                              </s-stack>
+                            </s-box>
+                          </s-clickable>
+                        );
+                        return i === 0
+                          ? [row]
+                          : [<s-divider key={`d-${c.id}`} />, row];
+                      })}
+                    </s-section>
+                  ) : null}
                   {!custSearching &&
                   !custError &&
                   custQuery.trim().length >= 2 &&
