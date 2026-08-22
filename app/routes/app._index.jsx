@@ -89,7 +89,32 @@ function RequestRow({ r }) {
           >
             {r.customerName}
           </Link>
+          {/* Submitted by the shopper on the storefront, not taken by a
+              salesperson — nobody has spoken to them yet. */}
+          {r.source === "customer" && (
+            <span
+              title="Submitted by the customer on the storefront — call them"
+              style={{
+                marginLeft: 6,
+                fontSize: 10,
+                fontWeight: 700,
+                textTransform: "uppercase",
+                letterSpacing: "0.5px",
+                padding: "2px 8px",
+                borderRadius: 10,
+                background: "#fff5ea",
+                color: "#a85100",
+              }}
+            >
+              Call customer
+            </span>
+          )}
         </div>
+        {r.customerPhone && (
+          <div style={{ fontSize: 12, color: r.source === "customer" ? "#a85100" : "#6d7175" }}>
+            {r.customerPhone}
+          </div>
+        )}
         {r.customerEmail && (
           <div style={{ fontSize: 12, color: "#6d7175" }}>{r.customerEmail}</div>
         )}

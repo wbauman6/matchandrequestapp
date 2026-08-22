@@ -1,0 +1,9 @@
+{
+  "request_form": {
+    "required": "Required",
+    "optional": "Optional",
+    "sending": "Sending…",
+    "error_generic": "Something went wrong. Please try again, or call the store and we'll help you.",
+    "error_offline": "We couldn't reach the store. Please check your connection and try again."
+  }
+}

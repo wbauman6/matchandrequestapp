@@ -33,6 +33,16 @@ model Request {
   shop             String
   customerName     String
   customerEmail    String?
+  // Callback number. Required for storefront (customer-submitted) requests —
+  // the assigned salesperson phones the customer. Optional for staff-created.
+  customerPhone    String?
+  // Where the request came from:
+  //   "staff"    — created in the admin app or the POS extension by a salesperson
+  //   "customer" — submitted by a shopper on the storefront form (app proxy).
+  // Customer-submitted requests are round-robin assigned and flagged in POS and
+  // the admin app so the salesperson knows to phone the customer. The CUSTOMER
+  // never sees matches — results are staff-only. See app/routes/proxy.requests.jsx.
+  source           String   @default("staff")
   salespersonName  String
   salespersonEmail String
   description      String?
@@ -73,6 +83,7 @@ model Request {
 
   @@index([shop])
   @@index([shop, itemType])
+  @@index([shop, source, createdAt])
 }
 
 model Match {
@@ -131,11 +142,31 @@ model Salesperson {
   // the POS Session API exposes staffMemberId but not email. Set once via Settings.
   posStaffId String?
   active    Boolean  @default(true)
+  // Opt-in to the round-robin rotation for CUSTOMER-SUBMITTED (storefront)
+  // requests. Defaults on for new salespeople; the admin app turns it off for
+  // admins on create and it is toggleable per person in Settings. Only active
+  // people with this flag receive storefront requests. See app/lib/rotation.server.js.
+  inRotation Boolean @default(true)
+  // Last time the rotation handed this person a customer-submitted request.
+  // Display/diagnostics only — fairness comes from RotationState.cursor.
+  lastAssignedAt DateTime?
   createdAt DateTime @default(now())
 
   @@unique([shop, email])
   @@index([shop])
   @@index([shop, posStaffId])
+  @@index([shop, inRotation, active])
+}
+
+// Round-robin cursor for assigning customer-submitted requests, one row per
+// shop. `cursor` is a monotonically increasing counter incremented atomically
+// (INSERT … ON CONFLICT … RETURNING) so two simultaneous storefront submissions
+// can never take the same slot; the assignee is candidates[(cursor - 1) % n]
+// over a deterministically ordered candidate list.
+model RotationState {
+  shop      String   @id
+  cursor    Int      @default(0)
+  updatedAt DateTime @default(now()) @updatedAt
 }
 
 // Records that a (request, product-version) pair was already reasoned about, so

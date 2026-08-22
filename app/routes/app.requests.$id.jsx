@@ -531,6 +531,36 @@ export default function RequestDetailPage() {
   return (
     <s-page heading={req.customerName} backAction={{ content: "Requests", url: "/app" }}>
       <s-section heading="Request details">
+        {/* Customer-submitted requests were round-robin assigned; the assigned
+            salesperson is expected to phone the customer, who has been told only
+            that someone will be in touch. They have NOT seen any matches. */}
+        {req.source === "customer" && (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              flexWrap: "wrap",
+              background: "#fff5ea",
+              border: "1px solid #ffd79d",
+              borderRadius: 8,
+              padding: "12px 16px",
+              marginBottom: 20,
+              fontSize: 14,
+            }}
+          >
+            <strong style={{ color: "#a85100" }}>Submitted online</strong>
+            <span style={{ color: "#4a4a4a" }}>
+              Assigned to {req.salespersonName} by rotation — call the customer
+              {req.customerPhone ? " on " : "."}
+              {req.customerPhone && (
+                <a href={`tel:${req.customerPhone.replace(/[^\d+]/g, "")}`} style={{ fontWeight: 600 }}>
+                  {req.customerPhone}
+                </a>
+              )}
+            </span>
+          </div>
+        )}
         <div
           style={{
             display: "grid",
@@ -541,6 +571,8 @@ export default function RequestDetailPage() {
         >
           <DetailField label="Customer" value={req.customerName} />
           <DetailField label="Customer Email" value={req.customerEmail || "—"} />
+          <DetailField label="Customer Phone" value={req.customerPhone || "—"} />
+          <DetailField label="Source" value={req.source === "customer" ? "Customer (storefront)" : "Staff"} />
           <DetailField label="Salesperson" value={req.salespersonName} />
           <DetailField label="Salesperson Email" value={req.salespersonEmail} />
           <DetailField

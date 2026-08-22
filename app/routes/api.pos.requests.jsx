@@ -130,6 +130,11 @@ export const loader = async ({ request }) => {
   const shaped = requests.map((r) => ({
     id: r.id,
     customerName: r.customerName,
+    // Storefront submissions carry a phone number the salesperson is expected
+    // to call — surfaced with the "customer submitted" flag on POS.
+    customerPhone: r.customerPhone,
+    customerEmail: r.customerEmail,
+    source: r.source,
     description: r.description,
     matchNotes: r.matchNotes,
     budget: r.budget,

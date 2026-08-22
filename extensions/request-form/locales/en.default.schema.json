@@ -1,0 +1,23 @@
+{
+  "name": "Request an item",
+  "settings": {
+    "content": "Content",
+    "heading": "Heading",
+    "intro": "Intro text",
+    "name_label": "Name field label",
+    "email_label": "Email field label",
+    "phone_label": "Phone field label",
+    "phone_help": "Phone helper text",
+    "description_label": "Description field label",
+    "description_placeholder": "Description placeholder",
+    "show_budget": "Show budget field",
+    "budget_label": "Budget field label",
+    "button_label": "Submit button label",
+    "confirmation": "Confirmation",
+    "success_heading": "Confirmation heading",
+    "success_message": "Confirmation message",
+    "advanced": "Advanced",
+    "proxy_path": "App proxy path",
+    "proxy_path_info": "Must match the app proxy subpath configured for this app. Only change this if the app's proxy subpath was changed."
+  }
+}

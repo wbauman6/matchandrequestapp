@@ -1,0 +1,258 @@
+{%- liquid
+  assign block_id = 'wbj-request-' | append: block.id
+  assign proxy_path = block.settings.proxy_path | default: '/apps/requests' | strip
+-%}
+
+<div
+  class="wbj-request"
+  data-wbj-request-form
+  data-proxy-path="{{ proxy_path | escape }}"
+  id="{{ block_id }}"
+  {{ block.shopify_attributes }}
+>
+  <form class="wbj-request__form" novalidate data-wbj-form>
+    {%- if block.settings.heading != blank -%}
+      <h2 class="wbj-request__heading">{{ block.settings.heading | escape }}</h2>
+    {%- endif -%}
+
+    {%- if block.settings.intro != blank -%}
+      <div class="wbj-request__intro">{{ block.settings.intro }}</div>
+    {%- endif -%}
+
+    <div class="wbj-request__error" data-wbj-form-error hidden role="alert"></div>
+
+    <div class="wbj-request__field">
+      <label class="wbj-request__label" for="{{ block_id }}-name">
+        {{ block.settings.name_label | escape }}
+        <span class="wbj-request__req" aria-hidden="true">*</span>
+      </label>
+      <input
+        class="wbj-request__input"
+        id="{{ block_id }}-name"
+        name="name"
+        type="text"
+        autocomplete="name"
+        maxlength="100"
+        required
+      >
+    </div>
+
+    <div class="wbj-request__field">
+      <label class="wbj-request__label" for="{{ block_id }}-email">
+        {{ block.settings.email_label | escape }}
+        <span class="wbj-request__req" aria-hidden="true">*</span>
+      </label>
+      <input
+        class="wbj-request__input"
+        id="{{ block_id }}-email"
+        name="email"
+        type="email"
+        inputmode="email"
+        autocomplete="email"
+        maxlength="200"
+        required
+      >
+    </div>
+
+    <div class="wbj-request__field">
+      <label class="wbj-request__label" for="{{ block_id }}-phone">
+        {{ block.settings.phone_label | escape }}
+        <span class="wbj-request__req" aria-hidden="true">*</span>
+      </label>
+      <input
+        class="wbj-request__input"
+        id="{{ block_id }}-phone"
+        name="phone"
+        type="tel"
+        inputmode="tel"
+        autocomplete="tel"
+        maxlength="40"
+        required
+        {% if block.settings.phone_help != blank %}
+          aria-describedby="{{ block_id }}-phone-help"
+        {% endif %}
+      >
+      {%- if block.settings.phone_help != blank -%}
+        <p class="wbj-request__help" id="{{ block_id }}-phone-help">
+          {{- block.settings.phone_help | escape -}}
+        </p>
+      {%- endif -%}
+    </div>
+
+    <div class="wbj-request__field">
+      <label class="wbj-request__label" for="{{ block_id }}-description">
+        {{ block.settings.description_label | escape }}
+        <span class="wbj-request__req" aria-hidden="true">*</span>
+      </label>
+      <textarea
+        class="wbj-request__input wbj-request__textarea"
+        id="{{ block_id }}-description"
+        name="description"
+        rows="5"
+        maxlength="2000"
+        placeholder="{{ block.settings.description_placeholder | escape }}"
+        required
+      ></textarea>
+    </div>
+
+    {%- if block.settings.show_budget -%}
+      <div class="wbj-request__field">
+        <label class="wbj-request__label" for="{{ block_id }}-budget">
+          {{ block.settings.budget_label | escape }}
+          <span class="wbj-request__optional">({{ 'request_form.optional' | t }})</span>
+        </label>
+        <input
+          class="wbj-request__input"
+          id="{{ block_id }}-budget"
+          name="budget"
+          type="text"
+          inputmode="decimal"
+          maxlength="20"
+        >
+      </div>
+    {%- endif -%}
+
+    {% comment %}
+      Honeypot. Positioned off-screen rather than display:none — some bots skip
+      hidden inputs but fill anything they can parse. A submission with this
+      filled is silently discarded by the app.
+    {% endcomment %}
+    <div class="wbj-request__hp" aria-hidden="true">
+      <label for="{{ block_id }}-company-website">Company website</label>
+      <input
+        id="{{ block_id }}-company-website"
+        name="company_website"
+        type="text"
+        tabindex="-1"
+        autocomplete="off"
+      >
+    </div>
+
+    <button class="wbj-request__button" type="submit" data-wbj-submit>
+      {{- block.settings.button_label | escape -}}
+    </button>
+  </form>
+
+  {% comment %}
+    The customer only ever sees this. Matched products, prices, and stock are
+    staff-only and are never sent to the storefront — see the note at the top of
+    app/routes/proxy.requests.jsx.
+  {% endcomment %}
+  <div class="wbj-request__success" data-wbj-success hidden role="status" tabindex="-1">
+    {%- if block.settings.success_heading != blank -%}
+      <h2 class="wbj-request__heading">{{ block.settings.success_heading | escape }}</h2>
+    {%- endif -%}
+    <div class="wbj-request__intro">{{ block.settings.success_message }}</div>
+  </div>
+</div>
+
+{% schema %}
+{
+  "name": "t:name",
+  "target": "section",
+  "stylesheet": "request-form.css",
+  "javascript": "request-form.js",
+  "settings": [
+    {
+      "type": "header",
+      "content": "t:settings.content"
+    },
+    {
+      "type": "text",
+      "id": "heading",
+      "label": "t:settings.heading",
+      "default": "Looking for something we don't have?"
+    },
+    {
+      "type": "richtext",
+      "id": "intro",
+      "label": "t:settings.intro",
+      "default": "<p>Tell us what you have in mind and a member of our team will call you.</p>"
+    },
+    {
+      "type": "text",
+      "id": "name_label",
+      "label": "t:settings.name_label",
+      "default": "Your name"
+    },
+    {
+      "type": "text",
+      "id": "email_label",
+      "label": "t:settings.email_label",
+      "default": "Email"
+    },
+    {
+      "type": "text",
+      "id": "phone_label",
+      "label": "t:settings.phone_label",
+      "default": "Phone"
+    },
+    {
+      "type": "text",
+      "id": "phone_help",
+      "label": "t:settings.phone_help",
+      "default": "We'll call you to talk it through."
+    },
+    {
+      "type": "text",
+      "id": "description_label",
+      "label": "t:settings.description_label",
+      "default": "What are you looking for?"
+    },
+    {
+      "type": "text",
+      "id": "description_placeholder",
+      "label": "t:settings.description_placeholder",
+      "default": "e.g. an emerald-cut diamond ring in platinum, around 1.5 carats"
+    },
+    {
+      "type": "checkbox",
+      "id": "show_budget",
+      "label": "t:settings.show_budget",
+      "default": true
+    },
+    {
+      "type": "text",
+      "id": "budget_label",
+      "label": "t:settings.budget_label",
+      "default": "Budget"
+    },
+    {
+      "type": "text",
+      "id": "button_label",
+      "label": "t:settings.button_label",
+      "default": "Send request"
+    },
+    {
+      "type": "header",
+      "content": "t:settings.confirmation"
+    },
+    {
+      "type": "text",
+      "id": "success_heading",
+      "label": "t:settings.success_heading",
+      "default": "Thanks — we've got it"
+    },
+    {
+      "type": "richtext",
+      "id": "success_message",
+      "label": "t:settings.success_message",
+      "default": "<p>A member of our team will be in touch shortly.</p>"
+    },
+    {
+      "type": "header",
+      "content": "t:settings.advanced"
+    },
+    {
+      "type": "paragraph",
+      "content": "t:settings.proxy_path_info"
+    },
+    {
+      "type": "text",
+      "id": "proxy_path",
+      "label": "t:settings.proxy_path",
+      "default": "/apps/requests"
+    }
+  ]
+}
+{% endschema %}

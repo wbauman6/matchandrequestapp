@@ -418,6 +418,19 @@ function Modal() {
           <s-box padding="base">
             <s-stack direction="block" gap="base">
               <s-stack direction="block" gap="small">
+                {/* Customer-submitted requests arrive with nobody having spoken
+                    to the shopper yet — lead with the callback details. */}
+                {r.source === "customer" ? (
+                  <s-stack direction="block" gap="small">
+                    <s-badge tone="warning">Submitted online — call the customer</s-badge>
+                    {r.customerPhone ? (
+                      <s-text>Phone: {r.customerPhone}</s-text>
+                    ) : null}
+                    {r.customerEmail ? (
+                      <s-text>Email: {r.customerEmail}</s-text>
+                    ) : null}
+                  </s-stack>
+                ) : null}
                 {r.description ? <s-text>{r.description}</s-text> : null}
                 {r.budget != null ? <s-text>Budget: {money(r.budget)}</s-text> : null}
                 <s-text>Salesperson: {r.salespersonName}</s-text>
@@ -746,7 +759,13 @@ function Modal() {
                                 ? `${r.matchCount} match${r.matchCount === 1 ? "" : "es"}`
                                 : "watching"}
                             </s-badge>
+                            {r.source === "customer" ? (
+                              <s-badge tone="warning">Call customer</s-badge>
+                            ) : null}
                           </s-stack>
+                          {r.source === "customer" && r.customerPhone ? (
+                            <s-text>Submitted online · {r.customerPhone}</s-text>
+                          ) : null}
                           {isAdmin ? (
                             <s-text>Salesperson: {r.salespersonName}</s-text>
                           ) : null}

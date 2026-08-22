@@ -27,7 +27,9 @@ export const action = async ({ request }) => {
     }
     try {
       await prisma.salesperson.create({
-        data: { shop: session.shop, name, email, role },
+        // Storefront requests rotate across salespeople by default; admins are
+        // opted out on create and can opt themselves back in below.
+        data: { shop: session.shop, name, email, role, inRotation: role !== "admin" },
       });
     } catch (err) {
       if (err.code === "P2002") {
@@ -54,6 +56,17 @@ export const action = async ({ request }) => {
       where: { id: String(data.get("id")) },
       data: { posStaffId },
     });
+  }
+
+  if (act === "toggle-rotation") {
+    const id = String(data.get("id"));
+    const sp = await prisma.salesperson.findUnique({ where: { id } });
+    if (sp) {
+      await prisma.salesperson.update({
+        where: { id },
+        data: { inRotation: !sp.inRotation },
+      });
+    }
   }
 
   if (act === "toggle") {
@@ -194,6 +207,13 @@ export default function SettingsPage() {
           Staff ID on screen. Paste that number here. Admins see all requests on POS;
           salespeople see only their own.
         </p>
+        <p style={{ fontSize: 13, color: "#6d7175", margin: "0 0 16px" }}>
+          <strong>Online requests</strong> controls the round-robin for requests customers
+          submit themselves on the website. Everyone ticked here takes turns, evenly, and
+          is expected to <strong>phone</strong> the customer — those requests show a
+          &ldquo;Call customer&rdquo; flag in POS and here. New salespeople are included by
+          default; admins are not.
+        </p>
         {salespeople.length === 0 ? (
           <p
             style={{
@@ -210,7 +230,7 @@ export default function SettingsPage() {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
             <thead>
               <tr style={{ background: "#f6f6f7", textAlign: "left" }}>
-                {["Name", "Email", "Role", "POS Staff ID", "Status", "Actions"].map((h) => (
+                {["Name", "Email", "Role", "POS Staff ID", "Online requests", "Status", "Actions"].map((h) => (
                   <th
                     key={h}
                     style={{
@@ -262,6 +282,26 @@ export default function SettingsPage() {
                         Save
                       </button>
                     </Form>
+                  </td>
+                  <td style={{ padding: "12px 16px" }}>
+                    <Form method="post" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                      <input type="hidden" name="_action" value="toggle-rotation" />
+                      <input type="hidden" name="id" value={sp.id} />
+                      <input
+                        type="checkbox"
+                        checked={sp.inRotation}
+                        onChange={(e) => e.currentTarget.form.requestSubmit()}
+                        aria-label={`Include ${sp.name} in the storefront request rotation`}
+                      />
+                      <span style={{ fontSize: 12, color: sp.inRotation ? "#1a7a4a" : "#6d7175" }}>
+                        {sp.inRotation ? "In rotation" : "Excluded"}
+                      </span>
+                    </Form>
+                    {sp.inRotation && sp.lastAssignedAt && (
+                      <div style={{ fontSize: 11, color: "#8c9196", marginTop: 2 }}>
+                        Last: {new Date(sp.lastAssignedAt).toLocaleDateString()}
+                      </div>
+                    )}
                   </td>
                   <td style={{ padding: "12px 16px" }}>
                     <span

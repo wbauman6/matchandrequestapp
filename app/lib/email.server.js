@@ -168,6 +168,50 @@ export async function sendDigestEmail({ salespersonName, salespersonEmail, entri
 }
 
 /**
+ * Customer-request daily cap alert — sent ONCE on the day the storefront form
+ * hits CUSTOMER_REQUEST_DAILY_CAP. Past the cap, further storefront submissions
+ * are refused (with a "call the store" message) and no AI is spent on them, so
+ * this is both an abuse signal and a "you may be turning away real customers"
+ * signal. Staff-created requests are unaffected.
+ */
+export async function sendCustomerRequestCapAlert({ shop, count, limit, to }) {
+  const recipients = (to || []).filter(Boolean);
+  if (recipients.length === 0) return;
+  const appUrl = `https://${shop}/admin/apps/${process.env.SHOPIFY_API_KEY}`;
+
+  const html = shell(`
+    ${header("⚠ Storefront request cap reached")}
+    <div style="padding:24px 32px;">
+      <p style="margin:0 0 16px;font-size:15px;color:#a85100;font-weight:600;">
+        The storefront request form hit its daily cap of <strong>${limit}</strong>
+        (${count} attempts so far today).
+      </p>
+      <p style="margin:0 0 16px;font-size:14px;">
+        Further customer submissions are being refused for the rest of the day and are
+        <strong>not</strong> running matching, so no AI spend is accruing from them.
+        Requests created by staff in POS and the admin app are unaffected.
+      </p>
+      <p style="margin:0 0 16px;font-size:14px;">
+        If this is genuine demand rather than abuse, raise
+        <code style="background:#f6f6f7;padding:2px 6px;border-radius:4px;">CUSTOMER_REQUEST_DAILY_CAP</code>
+        and redeploy. If it looks like spam, leave it — the cap is doing its job.
+      </p>
+      <a href="${appUrl}" style="display:inline-block;background:#008060;color:#fff;text-decoration:none;padding:12px 24px;border-radius:6px;font-weight:600;font-size:14px;">
+        Open the app →
+      </a>
+    </div>
+    ${footer()}`);
+
+  const resend = getClient();
+  await resend.emails.send({
+    from: FROM,
+    to: recipients,
+    subject: `⚠ Storefront request cap reached (${count}/${limit} today)`,
+    html,
+  });
+}
+
+/**
  * Weekly-drop failure alert — sent when a drop run finishes "partial" or
  * "failed" (NOT the routine digest). Loud, with the audit numbers and the
  * failure list, so a silent zero-match run can never hide a real failure.

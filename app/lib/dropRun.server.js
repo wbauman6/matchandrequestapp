@@ -2,6 +2,7 @@ import prisma from "../db.server.js";
 import { unauthenticated } from "../shopify.server.js";
 import { enqueueProduct, drainProductQueue } from "./productQueue.server.js";
 import { sendDropAlertEmail } from "./email.server.js";
+import { alertRecipients } from "./alerts.server.js";
 
 // Admin GraphQL client for a shop with NO user present (background cron). Uses
 // the stored OFFLINE session; because the app runs with
@@ -12,17 +13,6 @@ import { sendDropAlertEmail } from "./email.server.js";
 async function getAdmin(shop) {
   const { admin } = await unauthenticated.admin(shop);
   return admin;
-}
-
-// Who gets the failure alert: active admin salespeople + optional ALERT_EMAIL.
-async function alertRecipients(shop) {
-  const admins = await prisma.salesperson.findMany({
-    where: { shop, role: "admin", active: true },
-    select: { email: true },
-  });
-  const list = admins.map((a) => a.email);
-  if (process.env.ALERT_EMAIL) list.push(process.env.ALERT_EMAIL);
-  return [...new Set(list.filter(Boolean))];
 }
 
 function shapeNode(node) {

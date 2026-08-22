@@ -1,0 +1,119 @@
+/*
+ * Storefront request form. Deliberately restrained: inherits the theme's font
+ * and colours wherever possible so it doesn't fight the merchant's design.
+ */
+
+.wbj-request {
+  max-width: 34rem;
+  margin: 0 auto;
+  font-size: 1rem;
+}
+
+.wbj-request__heading {
+  margin: 0 0 0.5rem;
+  font-size: 1.5rem;
+  line-height: 1.25;
+}
+
+.wbj-request__intro {
+  margin: 0 0 1.5rem;
+  line-height: 1.5;
+  opacity: 0.85;
+}
+
+.wbj-request__intro p {
+  margin: 0 0 0.5rem;
+}
+
+.wbj-request__field {
+  margin-bottom: 1rem;
+}
+
+.wbj-request__label {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.wbj-request__req {
+  color: #b3261e;
+}
+
+.wbj-request__optional {
+  font-weight: 400;
+  opacity: 0.6;
+}
+
+.wbj-request__input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.75rem;
+  font: inherit;
+  font-size: 1rem; /* 16px minimum stops iOS Safari zooming on focus */
+  color: inherit;
+  background: transparent;
+  border: 1px solid currentColor;
+  border-radius: 0.25rem;
+  opacity: 0.95;
+}
+
+.wbj-request__input:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 1px;
+}
+
+.wbj-request__textarea {
+  resize: vertical;
+  min-height: 6rem;
+}
+
+.wbj-request__help {
+  margin: 0.35rem 0 0;
+  font-size: 0.8125rem;
+  opacity: 0.7;
+}
+
+.wbj-request__button {
+  width: 100%;
+  padding: 0.85rem 1.5rem;
+  font: inherit;
+  font-weight: 600;
+  color: canvas;
+  background: currentColor;
+  border: 1px solid currentColor;
+  border-radius: 0.25rem;
+  cursor: pointer;
+}
+
+.wbj-request__button:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+
+.wbj-request__error {
+  margin-bottom: 1rem;
+  padding: 0.75rem 1rem;
+  font-size: 0.9375rem;
+  line-height: 1.4;
+  border: 1px solid #b3261e;
+  border-left-width: 4px;
+  border-radius: 0.25rem;
+}
+
+.wbj-request__success {
+  padding: 1.5rem 0;
+}
+
+.wbj-request__success:focus {
+  outline: none;
+}
+
+/* Honeypot: reachable by a parser, invisible and unfocusable for a person. */
+.wbj-request__hp {
+  position: absolute !important;
+  left: -9999px !important;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
