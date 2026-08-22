@@ -196,7 +196,7 @@ try {
   const before = await prisma.request.count({ where: { shop: SHOP, customerEmail: { contains: TAG } } });
 
   const honeypot = await submit(
-    submission({ email: `hp-${TAG}@example.com`, company_website: "http://spam.example" }),
+    submission({ email: `hp-${TAG}@example.com`, wbj_x2: "http://spam.example" }),
     { ip: "198.51.100.1" },
   );
   check("honeypot looks like success to the bot", () => {

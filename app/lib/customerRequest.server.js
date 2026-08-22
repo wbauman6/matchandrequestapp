@@ -49,7 +49,18 @@ export const LIMITS = {
 const TOKEN_MAX_AGE_MS = 30 * 60 * 1000;
 const TOKEN_MIN_AGE_MS = 3000;
 
-const HONEYPOT_FIELD = "company_website";
+/*
+ * Honeypot field name. MUST stay semantically meaningless.
+ *
+ * This was "company_website" and it silently killed real submissions: Chrome
+ * autofill recognises both "company" and "website" as profile field types,
+ * fills them even off-screen, and ignores autocomplete="off" for profile data.
+ * Every customer with autofill enabled was dropped with a fake success message.
+ *
+ * Do not name this after anything a browser or password manager can recognise
+ * (company, website, url, address, name, email, phone, organization, fax…).
+ */
+const HONEYPOT_FIELD = "wbj_x2";
 
 function secret() {
   return process.env.SHOPIFY_API_SECRET || "";
@@ -317,6 +328,63 @@ async function alertOnce(shop, count) {
     // An alert failure must never turn into a request failure.
     console.error("[customerRequest] cap alert failed:", err?.message || err);
   }
+}
+
+/* --------------------------------------------------- rejection visibility -- */
+
+/**
+ * Every refused submission goes through here.
+ *
+ * A refusal used to be a bare console.warn on a serverless function — i.e.
+ * invisible unless you went digging in Vercel. A honeypot false positive shipped
+ * and silently dropped real customers for hours because of exactly that. Now
+ * each refusal also increments a per-day, per-reason counter that the admin
+ * dashboard shows, so "customers are submitting but nothing is arriving" is
+ * something you can SEE.
+ *
+ * Never throws: telemetry must not be able to fail a request.
+ */
+export const REJECTION_REASONS = [
+  "honeypot",
+  "validation",
+  "bot_token",
+  "rate_limit",
+  "daily_cap",
+  "no_staff",
+];
+
+export async function logRejection(shop, reason, detail = {}) {
+  const parts = Object.entries(detail)
+    .filter(([, v]) => v !== undefined && v !== null && v !== "")
+    .map(([k, v]) => `${k}=${v}`)
+    .join(" ");
+  console.warn(`[customer-request] REJECTED reason=${reason} shop=${shop}${parts ? " " + parts : ""}`);
+  try {
+    await bumpCounter(`cr:rej:${reason}`);
+  } catch (err) {
+    console.error("[customerRequest] rejection counter unavailable:", err?.message || err);
+  }
+}
+
+/**
+ * Today's intake tally for the admin dashboard: how many customer submissions
+ * were accepted, and how many were refused, broken down by reason.
+ */
+export async function intakeStatsToday() {
+  const [accepted, ...refused] = await Promise.all([
+    getCounter("cr:global"),
+    ...REJECTION_REASONS.map((r) => getCounter(`cr:rej:${r}`)),
+  ]);
+  const byReason = {};
+  REJECTION_REASONS.forEach((r, i) => {
+    byReason[r] = refused[i];
+  });
+  return {
+    accepted,
+    rejected: refused.reduce((a, b) => a + b, 0),
+    byReason,
+    limits: LIMITS,
+  };
 }
 
 /** Today's customer-submitted request count (for the admin app). */

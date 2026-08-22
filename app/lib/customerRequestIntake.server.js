@@ -7,6 +7,7 @@ import {
   validateSubmission,
   checkRateLimits,
   checkGlobalCap,
+  logRejection,
 } from "./customerRequest.server.js";
 
 /**
@@ -34,11 +35,13 @@ export async function intakeCustomerRequest({ shop, body, ip, admin }) {
   const validated = validateSubmission(body);
   if (!validated.ok) {
     if (validated.reason === "honeypot") {
-      // Look like a success so the bot doesn't learn what tripped it. Nothing
-      // was created and nothing was spent.
-      console.warn(`[customer-request] honeypot tripped (${shop})`);
+      // Still looks like a success so a bot doesn't learn what tripped it —
+      // but it is now counted, because a false positive here is invisible to
+      // the customer AND to us, and that has already cost real leads once.
+      await logRejection(shop, "honeypot", { ip: ip ? "present" : "none" });
       return { status: 200, body: { ok: true } };
     }
+    await logRejection(shop, "validation", { field: validated.field, rule: validated.reason });
     return {
       status: 400,
       body: { ok: false, error: validated.message, field: validated.field },
@@ -64,7 +67,7 @@ export async function intakeCustomerRequest({ shop, body, ip, admin }) {
   } else {
     const token = await verifyFormToken(rawToken);
     if (!token.ok) {
-      console.warn(`[customer-request] token rejected: ${token.reason} (${shop})`);
+      await logRejection(shop, "bot_token", { rule: token.reason });
       const stale = token.reason === "token_expired" || token.reason === "token_replayed";
       return {
         status: 400,
@@ -83,7 +86,7 @@ export async function intakeCustomerRequest({ shop, body, ip, admin }) {
   //    tokenless submission additionally gets the much tighter no-token cap.
   const limited = await checkRateLimits({ ip, email: customerEmail, degraded });
   if (!limited.ok) {
-    console.warn(`[customer-request] rate limited: ${limited.scope} (${shop})`);
+    await logRejection(shop, "rate_limit", { scope: limited.scope });
     return { status: 429, body: { ok: false, error: limited.message } };
   }
 
@@ -91,13 +94,14 @@ export async function intakeCustomerRequest({ shop, body, ip, admin }) {
   //    the shop's admins once on the day it trips.
   const capped = await checkGlobalCap(shop);
   if (!capped.ok) {
+    await logRejection(shop, "daily_cap", { scope: capped.scope });
     return { status: 429, body: { ok: false, error: capped.message } };
   }
 
   // 5. Round-robin the lead to a real person. Refuse rather than orphan it.
   const assignee = await pickNextSalesperson(shop);
   if (!assignee) {
-    console.error(`[customer-request] no staff to assign to (${shop}) — submission refused`);
+    await logRejection(shop, "no_staff", {});
     return {
       status: 503,
       body: {

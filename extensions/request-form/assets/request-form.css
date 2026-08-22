@@ -129,11 +129,13 @@
   outline: none;
 }
 
-/* Honeypot: reachable by a parser, invisible and unfocusable for a person. */
+/*
+ * Honeypot. MUST be display:none, not off-screen positioning.
+ *
+ * Off-screen fields are still considered fillable by Chrome autofill, which is
+ * how this silently ate real customer submissions. display:none is the one
+ * thing autofill reliably skips.
+ */
 .wbj-request__hp {
-  position: absolute !important;
-  left: -9999px !important;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
+  display: none !important;
 }

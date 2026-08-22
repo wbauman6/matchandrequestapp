@@ -104,8 +104,20 @@
         phone: value("phone"),
         description: value("description"),
         budget: value("budget"),
-        company_website: value("company_website"),
+        wbj_x2: value("wbj_x2"),
       };
+    }
+
+    // Belt and braces against the autofill failure that silently dropped real
+    // submissions: if anything managed to populate the honeypot in a browser
+    // that IS running this script, it was autofill or a password manager, not a
+    // bot. Clear it. A bot that POSTs without running our JS never gets here, so
+    // the honeypot still does its job against the traffic it's meant to catch.
+    function clearHoneypot() {
+      var hp = form.querySelector("[data-wbj-hp]");
+      if (hp && hp.value) {
+        hp.value = "";
+      }
     }
 
     function post(token) {
@@ -139,6 +151,7 @@
       }
 
       clearError();
+      clearHoneypot();
       setBusy(true);
 
       ensureToken()

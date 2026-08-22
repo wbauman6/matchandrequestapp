@@ -4,10 +4,11 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { runMatchesForRequest } from "../lib/matchRunner.server";
+import { intakeStatsToday } from "../lib/customerRequest.server";
 
 export const loader = async ({ request }) => {
   const { session } = await authenticate.admin(request);
-  const [requests, salespeople] = await Promise.all([
+  const [requests, salespeople, intake] = await Promise.all([
     prisma.request.findMany({
       where: { shop: session.shop, status: { in: ["active", "pending"] } },
       include: { _count: { select: { matches: { where: { declined: false } } } } },
@@ -17,9 +18,13 @@ export const loader = async ({ request }) => {
       where: { shop: session.shop, active: true },
       orderBy: { name: "asc" },
     }),
+    // Storefront intake tally. A refused submission is invisible to the
+    // customer AND used to be invisible here, which is how an autofilled
+    // honeypot quietly ate real leads. Surfaced so it can't happen again.
+    intakeStatsToday().catch(() => null),
   ]);
   const hasAnthropicKey = Boolean(process.env.ANTHROPIC_API_KEY);
-  return { requests, salespeople, hasAnthropicKey };
+  return { requests, salespeople, hasAnthropicKey, intake };
 };
 
 export const action = async ({ request }) => {
@@ -541,8 +546,81 @@ function TagInput({ tags, onChange }) {
   );
 }
 
+const REJECTION_LABEL = {
+  honeypot: "Bot trap tripped",
+  validation: "Incomplete or junk",
+  bot_token: "Failed bot check",
+  rate_limit: "Rate limited",
+  daily_cap: "Daily cap reached",
+  no_staff: "Nobody in rotation",
+};
+
+/**
+ * Today's storefront intake. Only shown once there has been storefront
+ * activity, so it stays out of the way on a normal day.
+ *
+ * The refused count is the point of this panel: a refused submission is
+ * invisible to the customer (they still see a confirmation in the honeypot
+ * case) and was previously invisible here too. Refusals climbing while
+ * accepted stays at zero is the signature of a broken form, not of spam.
+ */
+function StorefrontIntake({ intake }) {
+  if (!intake || (intake.accepted === 0 && intake.rejected === 0)) return null;
+
+  const reasons = Object.entries(intake.byReason).filter(([, n]) => n > 0);
+  const alarming = intake.rejected > 0 && intake.accepted === 0;
+
+  return (
+    <s-section heading="Storefront requests today">
+      <div style={{ display: "flex", gap: 24, flexWrap: "wrap", alignItems: "baseline" }}>
+        <div>
+          <div style={{ fontSize: 24, fontWeight: 700, color: "#1a7a4a" }}>{intake.accepted}</div>
+          <div style={{ fontSize: 12, color: "#6d7175" }}>accepted</div>
+        </div>
+        <div>
+          <div
+            style={{ fontSize: 24, fontWeight: 700, color: intake.rejected > 0 ? "#a85100" : "#6d7175" }}
+          >
+            {intake.rejected}
+          </div>
+          <div style={{ fontSize: 12, color: "#6d7175" }}>refused</div>
+        </div>
+        {reasons.length > 0 && (
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {reasons.map(([reason, n]) => (
+              <span
+                key={reason}
+                style={{
+                  fontSize: 12,
+                  padding: "3px 10px",
+                  borderRadius: 12,
+                  background: "#fff5ea",
+                  color: "#a85100",
+                }}
+              >
+                {REJECTION_LABEL[reason] || reason}: {n}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+      {alarming && (
+        <p style={{ fontSize: 13, color: "#a85100", margin: "12px 0 0" }}>
+          Every storefront submission today was refused and none got through. If customers say
+          they submitted the form, believe them — check the reason above rather than assuming spam.
+        </p>
+      )}
+      <p style={{ fontSize: 12, color: "#6d7175", margin: "8px 0 0" }}>
+        Counts reset daily. Limits: {intake.limits.ipHourly}/hr and {intake.limits.ipDaily}/day per
+        visitor, {intake.limits.emailHourly}/hr and {intake.limits.emailDaily}/day per email,{" "}
+        {intake.limits.globalDaily}/day overall.
+      </p>
+    </s-section>
+  );
+}
+
 export default function RequestsPage() {
-  const { requests, salespeople } = useLoaderData();
+  const { requests, salespeople, intake } = useLoaderData();
   const nav = useNavigation();
   const [showForm, setShowForm] = useState(false);
   const [description, setDescription] = useState("");
@@ -563,6 +641,8 @@ export default function RequestsPage() {
       <s-button slot="primary-action" onClick={() => setShowForm((s) => !s)}>
         {showForm ? "Cancel" : "+ New Request"}
       </s-button>
+
+      <StorefrontIntake intake={intake} />
 
       {showForm && (
         <s-section heading="New Request">

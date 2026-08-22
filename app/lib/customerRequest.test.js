@@ -8,7 +8,7 @@ import crypto from "node:crypto";
 process.env.SHOPIFY_API_SECRET = "test-secret";
 process.env.POSTGRES_URL_NON_POOLING = "postgres://u:p@127.0.0.1:1/none";
 
-const { validateSubmission, issueFormToken, verifyFormToken } = await import(
+const { validateSubmission, issueFormToken, verifyFormToken, HONEYPOT_FIELD } = await import(
   "./customerRequest.server.js"
 );
 
@@ -41,10 +41,23 @@ test("budget is optional and never blocks a lead", () => {
 });
 
 test("honeypot submissions are rejected without a customer-facing message", () => {
-  const result = validateSubmission({ ...good, company_website: "http://spam.example" });
+  const result = validateSubmission({ ...good, wbj_x2: "http://spam.example" });
   assert.equal(result.ok, false);
   assert.equal(result.reason, "honeypot");
   assert.equal(result.message, null);
+});
+
+test("the old autofill-bait honeypot name is no longer a trap", () => {
+  // "company_website" matched Chrome autofill's profile heuristics and silently
+  // dropped real customers. If it ever comes back as the honeypot name, this
+  // fails. A stray field by that name must now be ignored, not fatal.
+  const result = validateSubmission({ ...good, company_website: "Acme Ltd" });
+  assert.equal(result.ok, true);
+});
+
+test("the honeypot name carries no autofill-recognisable semantics", () => {
+  const banned = /company|website|url|address|name|email|phone|organi|fax|title|city|zip/i;
+  assert.ok(!banned.test(HONEYPOT_FIELD), `honeypot name "${HONEYPOT_FIELD}" is autofill bait`);
 });
 
 test("rejects missing or nonsense contact details", () => {

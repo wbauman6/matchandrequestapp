@@ -114,18 +114,27 @@
     {%- endif -%}
 
     {% comment %}
-      Honeypot. Positioned off-screen rather than display:none — some bots skip
-      hidden inputs but fill anything they can parse. A submission with this
-      filled is silently discarded by the app.
+      Honeypot — catches bots that POST the form without running our JS.
+
+      It was previously named "company_website", labelled "Company website", and
+      hidden only by being positioned off-screen. Chrome autofill happily filled
+      it, and every one of those real customers was silently discarded. Hence,
+      all of the following are deliberate and load-bearing:
+        - meaningless name (nothing autofill can pattern-match)
+        - display:none, not off-screen — autofill skips display:none
+        - no label, aria-hidden, not tabbable
+        - request-form.js clears it immediately before submit, so a real
+          browser cannot trip it even if something did fill it
+      Keep it in the DOM: a direct POST that never ran our JS still trips it.
     {% endcomment %}
     <div class="wbj-request__hp" aria-hidden="true">
-      <label for="{{ block_id }}-company-website">Company website</label>
       <input
-        id="{{ block_id }}-company-website"
-        name="company_website"
+        id="{{ block_id }}-x2"
+        name="wbj_x2"
         type="text"
         tabindex="-1"
         autocomplete="off"
+        data-wbj-hp
       >
     </div>
 
