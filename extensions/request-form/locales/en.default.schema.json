@@ -13,6 +13,8 @@
     "show_budget": "Show budget field",
     "budget_label": "Budget field label",
     "button_label": "Submit button label",
+    "button_bg": "Button background",
+    "button_text": "Button text",
     "confirmation": "Confirmation",
     "success_heading": "Confirmation heading",
     "success_message": "Confirmation message",

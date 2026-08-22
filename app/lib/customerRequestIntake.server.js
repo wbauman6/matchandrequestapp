@@ -47,24 +47,41 @@ export async function intakeCustomerRequest({ shop, body, ip, admin }) {
   const { customerName, customerEmail, customerPhone, description, budget } = validated.values;
 
   // 2. Proof the form was actually loaded and filled in by a human-ish client.
-  const token = await verifyFormToken(body?.token);
-  if (!token.ok) {
-    console.warn(`[customer-request] token rejected: ${token.reason} (${shop})`);
-    const stale = token.reason === "token_expired" || token.reason === "token_replayed";
-    return {
-      status: 400,
-      body: {
-        ok: false,
-        error: stale
-          ? "This form has been open for a while. Please refresh the page and try again."
-          : "We couldn't verify that submission. Please refresh the page and try again.",
-        retryable: stale,
-      },
-    };
+  //
+  // ABSENT is not the same as INVALID, and they must not be treated the same:
+  //   - absent  → the shopper's browser couldn't reach the token endpoint. That
+  //               is our outage, not their fault, and refusing here would
+  //               silently block every customer. Accept in degraded mode and
+  //               lean on validation + rate limits + the global cap, which are
+  //               what actually bound abuse anyway.
+  //   - invalid → a forged, replayed, expired, or too-fast token is a tampering
+  //               signal from a client that DID reach us. Still refused.
+  const rawToken = typeof body?.token === "string" ? body.token.trim() : "";
+  const degraded = rawToken === "";
+
+  if (degraded) {
+    console.warn(`[customer-request] no form token — accepting in degraded mode (${shop})`);
+  } else {
+    const token = await verifyFormToken(rawToken);
+    if (!token.ok) {
+      console.warn(`[customer-request] token rejected: ${token.reason} (${shop})`);
+      const stale = token.reason === "token_expired" || token.reason === "token_replayed";
+      return {
+        status: 400,
+        body: {
+          ok: false,
+          error: stale
+            ? "This form has been open for a while. Please refresh the page and try again."
+            : "We couldn't verify that submission. Please refresh the page and try again.",
+          retryable: stale,
+        },
+      };
+    }
   }
 
-  // 3. Per-IP / per-email throttles (counts attempts, not successes).
-  const limited = await checkRateLimits({ ip, email: customerEmail });
+  // 3. Per-IP / per-email throttles (counts attempts, not successes). A
+  //    tokenless submission additionally gets the much tighter no-token cap.
+  const limited = await checkRateLimits({ ip, email: customerEmail, degraded });
   if (!limited.ok) {
     console.warn(`[customer-request] rate limited: ${limited.scope} (${shop})`);
     return { status: 429, body: { ok: false, error: limited.message } };

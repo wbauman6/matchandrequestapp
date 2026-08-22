@@ -62,6 +62,17 @@
     form.addEventListener("focusin", function () { primeToken(false); }, { once: true });
     form.addEventListener("input", function () { primeToken(false); }, { once: true });
 
+    // Never block a real customer because the token endpoint hiccuped. Retry
+    // once at submit time; if it still fails, submit WITHOUT a token — the
+    // server accepts that in degraded mode and falls back to validation and
+    // rate limits. Silently refusing every shopper would be far worse than the
+    // small amount of bot cover this layer provides.
+    function ensureToken() {
+      return primeToken(false).then(function (token) {
+        return token || primeToken(true);
+      });
+    }
+
     function showError(message) {
       if (!errorBox) return;
       errorBox.textContent = message;
@@ -87,7 +98,7 @@
 
     function payload(token) {
       return {
-        token: token,
+        token: token || "",
         name: value("name"),
         email: value("email"),
         phone: value("phone"),
@@ -130,7 +141,7 @@
       clearError();
       setBusy(true);
 
-      primeToken(false)
+      ensureToken()
         .then(post)
         .then(function (result) {
           // A stale token is the one error worth retrying silently — the

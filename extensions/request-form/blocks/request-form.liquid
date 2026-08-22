@@ -8,6 +8,7 @@
   data-wbj-request-form
   data-proxy-path="{{ proxy_path | escape }}"
   id="{{ block_id }}"
+  style="--wbj-button-bg: {{ block.settings.button_bg }}; --wbj-button-text: {{ block.settings.button_text }};"
   {{ block.shopify_attributes }}
 >
   <form class="wbj-request__form" novalidate data-wbj-form>
@@ -222,6 +223,18 @@
       "id": "button_label",
       "label": "t:settings.button_label",
       "default": "Send request"
+    },
+    {
+      "type": "color",
+      "id": "button_bg",
+      "label": "t:settings.button_bg",
+      "default": "#1c1c1c"
+    },
+    {
+      "type": "color",
+      "id": "button_text",
+      "label": "t:settings.button_text",
+      "default": "#ffffff"
     },
     {
       "type": "header",

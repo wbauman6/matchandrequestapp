@@ -74,21 +74,41 @@
   opacity: 0.7;
 }
 
+/*
+ * Colours come from block settings via custom properties set on .wbj-request,
+ * so the merchant matches the button to their theme in the theme editor.
+ *
+ * Do NOT go back to `background: currentColor` with `color` set in the same
+ * rule: currentColor resolves against the element's OWN color, so the button
+ * paints itself invisible (white on white). That shipped once already.
+ */
 .wbj-request__button {
   width: 100%;
   padding: 0.85rem 1.5rem;
   font: inherit;
   font-weight: 600;
-  color: canvas;
-  background: currentColor;
-  border: 1px solid currentColor;
+  color: var(--wbj-button-text, #ffffff);
+  background: var(--wbj-button-bg, #1c1c1c);
+  border: 1px solid var(--wbj-button-bg, #1c1c1c);
   border-radius: 0.25rem;
   cursor: pointer;
+  transition: opacity 0.15s ease;
 }
 
-.wbj-request__button:disabled {
+.wbj-request__button:hover:not(:disabled) {
+  opacity: 0.88;
+}
+
+.wbj-request__button:focus-visible {
+  outline: 2px solid var(--wbj-button-bg, #1c1c1c);
+  outline-offset: 2px;
+}
+
+/* Only ever true while a submission is in flight — bot protection never
+   disables the button. Keep it legible, not just faded out. */
+.wbj-request__button[disabled] {
   cursor: progress;
-  opacity: 0.6;
+  opacity: 0.65;
 }
 
 .wbj-request__error {

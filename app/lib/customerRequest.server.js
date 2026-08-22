@@ -37,6 +37,11 @@ export const LIMITS = {
   emailHourly: num(process.env.CUSTOMER_REQUEST_EMAIL_HOURLY_LIMIT, 2),
   emailDaily: num(process.env.CUSTOMER_REQUEST_EMAIL_DAILY_LIMIT, 5),
   globalDaily: num(process.env.CUSTOMER_REQUEST_DAILY_CAP, 50),
+  // Applies only to submissions that arrive with NO form token at all (see the
+  // degraded path in customerRequestIntake.server.js). Deliberately tight: it
+  // keeps a real customer working through a network blip without handing a bot
+  // an unlimited token-free lane.
+  noTokenIpHourly: num(process.env.CUSTOMER_REQUEST_NOTOKEN_IP_HOURLY_LIMIT, 2),
 };
 
 // How long a form token stays usable, and the minimum time a human plausibly
@@ -230,10 +235,17 @@ export function validateSubmission(body) {
  * a forwarded header is ultimately attacker-influenced. Treat this as friction,
  * not proof — `checkGlobalCap` is the guard that actually bounds spend.
  */
-export async function checkRateLimits({ ip, email }) {
+export async function checkRateLimits({ ip, email, degraded = false }) {
   const hour = hourKey();
   const checks = [];
 
+  if (degraded && ip) {
+    checks.push({
+      key: `cr:nt:${tag(ip)}:${hour}`,
+      limit: LIMITS.noTokenIpHourly,
+      scope: "no_token_ip_hourly",
+    });
+  }
   if (ip) {
     checks.push({ key: `cr:ip:${tag(ip)}:${hour}`, limit: LIMITS.ipHourly, scope: "ip_hourly" });
     checks.push({ key: `cr:ip:${tag(ip)}`, limit: LIMITS.ipDaily, scope: "ip_daily" });

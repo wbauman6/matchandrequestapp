@@ -216,6 +216,22 @@ try {
   );
   check("forged token rejected with 400", () => assert.equal(forged.status, 400));
 
+  // Absent token = our outage, not a tampering signal. It must NOT block a real
+  // customer — but it gets its own tight per-IP cap so it isn't a free lane.
+  const deg1 = await submit(
+    { ...submission({ email: `deg1-${TAG}@example.com` }), token: "" },
+    { ip: "198.51.100.6" },
+  );
+  check("tokenless submission is accepted (degrades, never blocks)", () =>
+    assert.equal(deg1.status, 200));
+
+  await submit({ ...submission({ email: `deg2-${TAG}@example.com` }), token: "" }, { ip: "198.51.100.6" });
+  const deg3 = await submit(
+    { ...submission({ email: `deg3-${TAG}@example.com` }), token: "" },
+    { ip: "198.51.100.6" },
+  );
+  check("the tokenless lane is tightly capped per IP", () => assert.equal(deg3.status, 429));
+
   const replay = submission({ email: `replay-${TAG}@example.com` });
   await submit(replay, { ip: "198.51.100.4" });
   const replayed = await submit(
@@ -236,8 +252,9 @@ try {
     assert.ok(throttled !== null && throttled <= 3, `not throttled within 4 attempts (got ${throttled})`));
 
   const after = await prisma.request.count({ where: { shop: SHOP, customerEmail: { contains: TAG } } });
-  check("rejected submissions created no rows beyond the allowed ones", () =>
-    assert.ok(after - before <= 4, `created ${after - before} rows from abuse traffic`));
+  // Allowed to create: 1 replay-first + 2 tokenless + 3 flood-before-throttle.
+  check("refused submissions created no rows", () =>
+    assert.ok(after - before <= 6, `created ${after - before} rows from abuse traffic`));
 
   /* ------------------------------------------------- 4. matching runs ---- */
   // Off Vercel there is no waitUntil, so matching runs as a detached promise.
