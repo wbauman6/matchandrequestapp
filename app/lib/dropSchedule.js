@@ -6,11 +6,21 @@
  * >>> EDIT THIS FILE to change the drop day/time. <<<
  *
  * The window is evaluated in DROP_TIMEZONE with Intl (never a fixed UTC hour),
- * so it lands at 4 PM Eastern year-round across daylight-saving changes.
+ * so it opens at 4 PM Eastern year-round across daylight-saving changes.
+ *
+ * SCHEDULING NOTE: Vercel crons fire at a FIXED UTC time (no timezone support),
+ * so no single UTC time is 4 PM ET in both DST regimes. The cron is 21:00 UTC:
+ *   • Winter (EST): 21:00 UTC = 4:00 PM ET — exact.
+ *   • Summer (EDT): 21:00 UTC = 5:00 PM ET — one hour after the drop (fine; the
+ *     drop has fully landed). Never BEFORE 4 PM, so the window never rejects it.
+ * (20:00 UTC would be 4 PM EDT but 3 PM EST — the window would skip it all
+ * winter, so we don't use it.) Hobby-plan crons are also best-effort and can be
+ * delayed by up to a few hours; the window (open until early Wed) absorbs that,
+ * and the last-successful-run watermark guarantees a delayed/skipped run loses
+ * no inventory — the next successful run detects everything since.
  * Triggers during the window:
  *   1. The drop's own products/create|update webhooks (exact timing).
- *   2. The /api/weekly-drop cron backstop (Tue 22:00 UTC = 5/6 PM ET, always
- *      inside the window in both DST regimes).
+ *   2. The /api/weekly-drop cron (Tue 21:00 UTC), inside the window both regimes.
  * Outside the window, webhooks only queue events + screen sold items (no AI).
  * The window extends into early Wednesday so a large drop can finish draining.
  */

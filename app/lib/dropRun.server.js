@@ -1,23 +1,17 @@
 import prisma from "../db.server.js";
+import { unauthenticated } from "../shopify.server.js";
 import { enqueueProduct, drainProductQueue } from "./productQueue.server.js";
 import { sendDropAlertEmail } from "./email.server.js";
 
-const API_VERSION = "2025-10";
-
-// A working offline Admin token for the shop (tokens can go stale; probe them).
-async function getWorkingToken(shop) {
-  const sessions = await prisma.session.findMany({ where: { shop, isOnline: false } });
-  for (const s of sessions) {
-    try {
-      const res = await fetch(`https://${shop}/admin/api/${API_VERSION}/graphql.json`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Shopify-Access-Token": s.accessToken },
-        body: JSON.stringify({ query: "{ shop { name } }" }),
-      });
-      if ((await res.json()).data) return s.accessToken;
-    } catch { /* try next */ }
-  }
-  return null;
+// Admin GraphQL client for a shop with NO user present (background cron). Uses
+// the stored OFFLINE session; because the app runs with
+// `expiringOfflineAccessTokens`, the library refreshes the (expiring) offline
+// access token via the durable refresh token automatically — no "reopen the
+// app" needed. Throws if the offline session is missing or the token was
+// revoked (app uninstalled), which the caller records + alerts on.
+async function getAdmin(shop) {
+  const { admin } = await unauthenticated.admin(shop);
+  return admin;
 }
 
 // Who gets the failure alert: active admin salespeople + optional ALERT_EMAIL.
@@ -45,17 +39,19 @@ function shapeNode(node) {
   };
 }
 
-async function gqlProducts(shop, token, filter) {
-  const endpoint = `https://${shop}/admin/api/${API_VERSION}/graphql.json`;
-  const QUERY = `query($cursor:String){ products(first:250, after:$cursor, query:${JSON.stringify(filter)}){ pageInfo{hasNextPage endCursor} edges{ node{ id title description tags totalInventory tracksInventory priceRangeV2{minVariantPrice{amount}} featuredImage{url} } } } }`;
+const PRODUCTS_QUERY = `#graphql
+  query DropProducts($cursor: String, $q: String!) {
+    products(first: 250, after: $cursor, query: $q) {
+      pageInfo { hasNextPage endCursor }
+      edges { node { id title description tags totalInventory tracksInventory priceRangeV2 { minVariantPrice { amount } } featuredImage { url } } }
+    }
+  }`;
+
+async function gqlProducts(admin, filter) {
   const out = [];
   let cursor = null, hasNext = true;
   while (hasNext) {
-    const res = await fetch(endpoint, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Shopify-Access-Token": token },
-      body: JSON.stringify({ query: QUERY, variables: { cursor } }),
-    });
+    const res = await admin.graphql(PRODUCTS_QUERY, { variables: { cursor, q: filter } });
     const json = await res.json();
     if (!json.data?.products) throw new Error("Shopify products query failed: " + JSON.stringify(json.errors || json).slice(0, 200));
     const page = json.data.products;
@@ -81,18 +77,47 @@ async function gqlProducts(shop, token, filter) {
  *    "evaluated, nothing qualified".
  *  - AUDIT + ALERT: persists counts + failure list; emails on partial/failed.
  */
+// A run that can't finish inside the function budget must FAIL loudly, never
+// hang as "running" forever. Kept under Vercel's maxDuration (120s).
+const RUN_DEADLINE_MS = 100_000;
+// Any DropRun still "running" longer than this was killed mid-flight (function
+// timeout / crash); the next run reaps it as failed.
+const STALE_RUNNING_MS = 20 * 60 * 1000;
+
 export async function runWeeklyDrop(shop, { force = false, trigger = "cron" } = {}) {
+  // Reap stuck runs from prior invocations so they never hang as "running".
+  await prisma.dropRun
+    .updateMany({
+      where: { shop, status: "running", startedAt: { lt: new Date(Date.now() - STALE_RUNNING_MS) } },
+      data: { status: "failed", note: "stale — killed before completing (function timeout/crash)", finishedAt: new Date() },
+    })
+    .catch(() => {});
+
   const startedAt = new Date();
-  const lastOk = await prisma.dropRun.findFirst({
-    where: { shop, status: "ok" },
-    orderBy: { startedAt: "desc" },
-  });
+  const lastOk = await prisma.dropRun.findFirst({ where: { shop, status: "ok" }, orderBy: { startedAt: "desc" } });
   // First run (or none OK yet): cover the last 30 days.
   const since = lastOk?.coverageThrough || new Date(Date.now() - 30 * 24 * 3600 * 1000);
-  const run = await prisma.dropRun.create({
-    data: { shop, status: "running", trigger, since, startedAt },
-  });
+  const run = await prisma.dropRun.create({ data: { shop, status: "running", trigger, since, startedAt } });
 
+  // Race the actual work against a hard deadline so a stall records FAILED on
+  // THIS run row (never leaves it "running") and its remaining work retries.
+  let timer;
+  const timeout = new Promise((_, rej) => {
+    timer = setTimeout(async () => {
+      await prisma.dropRun
+        .update({ where: { id: run.id }, data: { status: "failed", note: "exceeded time budget (100s); remaining work retries next run", finishedAt: new Date() } })
+        .catch(() => {});
+      rej(new Error("run exceeded time budget"));
+    }, RUN_DEADLINE_MS);
+  });
+  try {
+    return await Promise.race([runWeeklyDropInner(shop, { force, run, since, startedAt }), timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function runWeeklyDropInner(shop, { force, run, since, startedAt }) {
   const failures = [];
   const audit = {
     productsDetected: 0, productsEmbedded: 0, embedFailures: 0,
@@ -101,12 +126,18 @@ export async function runWeeklyDrop(shop, { force = false, trigger = "cron" } = 
   };
 
   try {
-    const token = await getWorkingToken(shop);
-    if (!token) throw new Error("no working Shopify Admin token (reopen the app to refresh)");
+    let admin;
+    try {
+      admin = await getAdmin(shop);
+    } catch (e) {
+      // Offline session missing or token revoked (app uninstalled). This is a
+      // real, actionable failure — surface it loudly, don't "reopen the app".
+      throw new Error(`Shopify Admin auth failed for ${shop} — the offline token is missing or revoked (reinstall the app). ${String(e?.message || e).slice(0, 150)}`);
+    }
 
     // 1) DETECTION — changed since watermark (no cap), shaped + enqueued.
     const sinceIso = since.toISOString();
-    const changed = await gqlProducts(shop, token, `updated_at:>='${sinceIso}' status:active`);
+    const changed = await gqlProducts(admin, `updated_at:>='${sinceIso}' status:active`);
     audit.productsDetected = changed.length;
     for (const node of changed) {
       await enqueueProduct(shop, shapeNode(node)).catch((e) =>
@@ -120,7 +151,7 @@ export async function runWeeklyDrop(shop, { force = false, trigger = "cron" } = 
       (await prisma.productEmbedding.findMany({ where: { shop }, select: { productId: true } })).map((e) => e.productId),
     );
     const changedIds = new Set(changed.map((n) => n.id));
-    const allActive = await gqlProducts(shop, token, "status:active");
+    const allActive = await gqlProducts(admin, "status:active");
     let healed = 0;
     for (const node of allActive) {
       if (embeddedIds.has(node.id) || changedIds.has(node.id)) continue;

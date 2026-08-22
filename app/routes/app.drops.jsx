@@ -48,7 +48,9 @@ function Stat({ label, value, warn }) {
 
 function RunCard({ r }) {
   const s = STATUS[r.status] || STATUS.running;
-  const when = new Date(r.startedAt).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  // Always show Eastern (the store/drop timezone), explicitly labeled, so the
+  // dashboard never depends on the viewer's browser timezone.
+  const when = new Date(r.startedAt).toLocaleString("en-US", { timeZone: "America/New_York", weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) + " ET";
   const failures = Array.isArray(r.failures) ? r.failures : [];
   return (
     <div style={{ border: "1px solid #e1e3e5", borderRadius: 8, padding: 16, marginBottom: 12 }}>

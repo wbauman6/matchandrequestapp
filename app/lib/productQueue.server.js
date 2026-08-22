@@ -1,4 +1,5 @@
 import prisma from "../db.server.js";
+import { unauthenticated } from "../shopify.server.js";
 import { cosineSimilarity } from "./matching.js";
 import {
   embedText,
@@ -104,20 +105,16 @@ async function claimBatch(shop) {
 // treating queued items as in stock; the daily backfill/cron self-corrects).
 async function fetchAvailability(shop, productIds) {
   try {
-    const sessions = await prisma.session.findMany({ where: { shop, isOnline: false } });
-    let data = null;
-    for (const sess of sessions) {
-      const res = await fetch(`https://${shop}/admin/api/2025-10/graphql.json`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Shopify-Access-Token": sess.accessToken },
-        body: JSON.stringify({
-          query: `query($ids:[ID!]!){ nodes(ids:$ids){ ... on Product { id status totalInventory tracksInventory } } }`,
-          variables: { ids: productIds },
-        }),
-      });
-      const json = await res.json();
-      if (json.data?.nodes) { data = json.data.nodes; break; }
-    }
+    // Offline admin client — the library refreshes the expiring offline token
+    // via the durable refresh token (works with no user present).
+    const { admin } = await unauthenticated.admin(shop);
+    const res = await admin.graphql(
+      `#graphql
+       query Avail($ids: [ID!]!) { nodes(ids: $ids) { ... on Product { id status totalInventory tracksInventory } } }`,
+      { variables: { ids: productIds } },
+    );
+    const json = await res.json();
+    const data = json.data?.nodes;
     if (!data) return null;
     const map = new Map();
     for (const n of data) {
