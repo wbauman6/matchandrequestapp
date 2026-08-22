@@ -8,9 +8,8 @@ import crypto from "node:crypto";
 process.env.SHOPIFY_API_SECRET = "test-secret";
 process.env.POSTGRES_URL_NON_POOLING = "postgres://u:p@127.0.0.1:1/none";
 
-const { validateSubmission, issueFormToken, verifyFormToken, HONEYPOT_FIELD } = await import(
-  "./customerRequest.server.js"
-);
+const { validateSubmission, issueFormToken, verifyFormToken, HONEYPOT_FIELD, counterNamespace } =
+  await import("./customerRequest.server.js");
 
 const good = {
   name: "Sarah Johnson",
@@ -107,6 +106,24 @@ test("rejects a description over the length cap", () => {
   const result = validateSubmission({ ...good, description: "ring ".repeat(500) });
   assert.equal(result.ok, false);
   assert.equal(result.reason, "description_length");
+});
+
+/* ------------------------------------------------------- counter namespace -- */
+
+test("counter namespace defaults to the production one", () => {
+  assert.equal(counterNamespace(), "cr");
+});
+
+test("counter namespace is overridable and read lazily", () => {
+  // The verify script relies on setting this AFTER this module is loaded, so it
+  // must not be captured at import time.
+  process.env.CUSTOMER_REQUEST_COUNTER_NS = "crtest";
+  try {
+    assert.equal(counterNamespace(), "crtest");
+  } finally {
+    delete process.env.CUSTOMER_REQUEST_COUNTER_NS;
+  }
+  assert.equal(counterNamespace(), "cr");
 });
 
 /* ------------------------------------------------------------ bot tokens -- */

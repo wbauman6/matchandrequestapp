@@ -1,18 +1,29 @@
 /**
  * End-to-end check for the storefront (customer-submitted) request form.
  *
- * Drives the real app-proxy route in-process with correctly HMAC-signed
- * requests — no browser, no deployed URL needed — and asserts the whole
- * contract:
+ * Drives the real intake in-process and asserts the whole contract:
  *
  *   1. a guest submission (no Shopify account) creates a Request
  *   2. it is flagged source="customer" and keeps the phone number
  *   3. consecutive submissions round-robin evenly across opted-in staff
  *   4. matching runs on it, exactly as for a staff-created request
  *   5. the CUSTOMER-FACING RESPONSE CONTAINS NO MATCHES — only { ok: true }
- *   6. junk, honeypot, and bad-token submissions are refused with zero AI spend
+ *   6. junk, honeypot, bad-token, and flood submissions are refused
+ *   7. the run leaves NO trace on live data
  *
- * Creates temporary salespeople and requests, then deletes them.
+ * Isolation, which is load-bearing — this runs against the production database:
+ *
+ *   - Rotation and abuse checks run under a SYNTHETIC shop with its own test
+ *     staff. An earlier version instead "parked" the real salespeople (flipping
+ *     their inRotation off) and restored them in a finally block; a run that
+ *     died left three real salespeople out of the rotation, silently funnelling
+ *     every customer request to one person. Never mutate real staff.
+ *   - Counters go to their own namespace, so the run cannot spend the real
+ *     daily cap, throttle real customers, or pollute the rejection telemetry
+ *     the admin dashboard shows.
+ *   - Only the single matching check touches the real shop, because matching
+ *     has to run against real product embeddings to prove anything. It creates
+ *     one request, then deletes it.
  *
  *   node scripts/verify-storefront-request.mjs
  *
@@ -27,25 +38,30 @@ import assert from "node:assert/strict";
 
 // db.server.js builds its connection pool at import time, and static imports are
 // hoisted above config() — so it must be imported dynamically, after the .env
-// values exist. (scripts/test-keepwatching.mjs has the same latent issue, which
-// is why its cost-counter writes fail locally.)
+// values exist.
 const { default: prisma } = await import("../app/db.server.js");
 
-const SHOP = process.env.TEST_SHOP || "walter-bauman-jewelers.myshopify.com";
-const TAG ="storefront-test-" + crypto.randomUUID().slice(0, 8);
+// The real shop, used ONLY for the matching check.
+const REAL_SHOP = process.env.TEST_SHOP || "walter-bauman-jewelers.myshopify.com";
+// Synthetic shop for everything else. Nothing real lives here.
+const TEST_SHOP = "verify-storefront.myshopify.test";
+const TAG = "storefront-test-" + crypto.randomUUID().slice(0, 8);
 
-// The Shopify credentials live in the CLI/Vercel, not .env. When they're absent
-// (normal for a local run) fall back to a synthetic secret and sign the test
-// requests with the same one — authenticate.public.appProxy still runs for real,
-// so the HMAC verification path is genuinely exercised. Customer→Shopify record
-// linking is the one thing this can't cover locally: without a live offline
-// session the lookup fails closed and the request is stored as a guest.
+// The Shopify credentials live in the CLI/Vercel, not .env. When absent, fall
+// back to a synthetic secret — the intake logic under test doesn't care, and
+// customer→Shopify-record linking is skipped (admin: null), which is the guest
+// path a shopper without an account takes anyway.
 process.env.SHOPIFY_API_SECRET ||= "e2e-test-secret";
 process.env.SHOPIFY_API_KEY ||= "e2e-test-key";
 process.env.SHOPIFY_APP_URL ||= "https://app.example";
 const SECRET = process.env.SHOPIFY_API_SECRET;
+
+// Own counter namespace, set BEFORE the app modules load.
+const COUNTER_NS = "crtest";
+process.env.CUSTOMER_REQUEST_COUNTER_NS = COUNTER_NS;
+
 // Neon auto-suspends; the first connection after an idle period can fail while
-// the compute wakes up. Retry before declaring the database unreachable.
+// the compute wakes up.
 let awake = false;
 for (let attempt = 1; attempt <= 4 && !awake; attempt++) {
   try {
@@ -60,12 +76,13 @@ for (let attempt = 1; attempt <= 4 && !awake; attempt++) {
   }
 }
 
-// Drives the intake exactly as the route does after it has authenticated the
-// proxy signature. `admin: null` means customer→Shopify-record linking is
-// skipped, so these all land as guests — the path a shopper without an account
-// takes anyway.
-function submit(body, { ip = "203.0.113.7" } = {}) {
-  return intakeCustomerRequest({ shop: SHOP, body, ip, admin: null });
+const { intakeCustomerRequest } = await import("../app/lib/customerRequestIntake.server.js");
+const { issueFormToken, verifyFormToken } = await import("../app/lib/customerRequest.server.js");
+
+// Drives the intake exactly as the route does once it has authenticated the
+// proxy signature.
+function submit(body, { ip = "203.0.113.7", shop = TEST_SHOP } = {}) {
+  return intakeCustomerRequest({ shop, body, ip, admin: null });
 }
 
 // A token old enough to clear the minimum fill time.
@@ -86,14 +103,24 @@ const submission = (over = {}) => ({
   ...over,
 });
 
-const { intakeCustomerRequest } = await import("../app/lib/customerRequestIntake.server.js");
-const { issueFormToken, verifyFormToken } = await import("../app/lib/customerRequest.server.js");
+/** Snapshot of live production counters — this run must not change any. */
+async function liveCounterSnapshot() {
+  const rows = await prisma.$queryRawUnsafe(
+    `SELECT key, count FROM "DailyCounter" WHERE day = CURRENT_DATE AND key LIKE 'cr:%' ORDER BY key`,
+  );
+  return rows.map((r) => `${r.key}=${r.count}`).join(",");
+}
 
-let created = [];
-let staff = [];
-// Exactly the real salespeople this run parked, so cleanup restores those and
-// only those — never re-enrolling someone who was deliberately opted out.
-let parkedIds = [];
+/** Snapshot of real staff rotation membership — this run must not change any. */
+async function realStaffSnapshot() {
+  const rows = await prisma.salesperson.findMany({
+    where: { shop: REAL_SHOP },
+    orderBy: { id: "asc" },
+    select: { email: true, active: true, inRotation: true },
+  });
+  return rows.map((r) => `${r.email}:${r.active}:${r.inRotation}`).join(",");
+}
+
 let failures = 0;
 const check = (name, fn) => {
   try {
@@ -107,7 +134,8 @@ const check = (name, fn) => {
 
 try {
   /* ---------------------------------------------------------------- setup -- */
-  // Three opted-in salespeople + one deliberately excluded admin.
+  // Three opted-in salespeople + one deliberately excluded admin, all in the
+  // synthetic shop. No real staff are touched.
   const people = [
     { name: `${TAG} Alice`, email: `alice-${TAG}@test.local`, role: "salesperson", inRotation: true },
     { name: `${TAG} Bob`, email: `bob-${TAG}@test.local`, role: "salesperson", inRotation: true },
@@ -115,27 +143,20 @@ try {
     { name: `${TAG} Admin`, email: `admin-${TAG}@test.local`, role: "admin", inRotation: false },
   ];
   for (const p of people) {
-    staff.push(await prisma.salesperson.create({ data: { shop: SHOP, active: true, ...p } }));
+    await prisma.salesperson.create({ data: { shop: TEST_SHOP, active: true, ...p } });
   }
-  // Isolate this run's rotation so the assertion doesn't depend on real staff.
-  parkedIds = (
-    await prisma.salesperson.findMany({
-      where: { shop: SHOP, active: true, inRotation: true, NOT: { email: { contains: TAG } } },
-      select: { id: true },
-    })
-  ).map((s) => s.id);
-  await prisma.salesperson.updateMany({
-    where: { id: { in: parkedIds } },
-    data: { inRotation: false },
-  });
-  console.log(`Setup: 3 in rotation, 1 admin excluded, ${parkedIds.length} real staff parked\n`);
+
+  const liveCountersBefore = await liveCounterSnapshot();
+  const realStaffBefore = await realStaffSnapshot();
+  console.log(`Setup: 3 in rotation + 1 admin, all under ${TEST_SHOP}`);
+  console.log(`Live counters at start: ${liveCountersBefore || "(none)"}`);
+  console.log(`Real staff untouched baseline captured (${REAL_SHOP})\n`);
 
   /* ------------------------------------------------------- 1. token ------ */
   console.log("Form token");
   const freshToken = issueFormToken();
   const freshVerdict = await verifyFormToken(freshToken);
-  check("issued token is well-formed", () =>
-    assert.equal(freshToken.split(".").length, 3));
+  check("issued token is well-formed", () => assert.equal(freshToken.split(".").length, 3));
   check("a token is unusable until the minimum fill time has passed", () =>
     assert.equal(freshVerdict.reason, "token_too_fast"));
 
@@ -143,7 +164,6 @@ try {
   console.log("\nGuest submissions (round-robin)");
   const responses = [];
   for (let i = 0; i < 6; i++) {
-    // Vary the IP so the per-IP hourly limit doesn't (correctly) block us.
     responses.push(
       await submit(submission({ email: `e2e-${TAG}-${i}@example.com` }), {
         ip: `203.0.113.${10 + i}`,
@@ -167,8 +187,8 @@ try {
     }
   });
 
-  created = await prisma.request.findMany({
-    where: { shop: SHOP, customerEmail: { contains: TAG } },
+  const created = await prisma.request.findMany({
+    where: { shop: TEST_SHOP, customerEmail: { contains: TAG } },
     orderBy: { createdAt: "asc" },
   });
 
@@ -178,8 +198,6 @@ try {
   check("phone number stored for the callback", () =>
     assert.ok(created.every((r) => r.customerPhone === "(555) 010-9988")));
   check("budget parsed", () => assert.ok(created.every((r) => r.budget === 4200)));
-  check("matching was kicked off (matchState set)", () =>
-    assert.ok(created.every((r) => r.matchState !== null)));
 
   check("round-robin is even (2 each across 3 people)", () => {
     const counts = {};
@@ -192,8 +210,8 @@ try {
     assert.ok(!created.some((r) => r.salespersonEmail.startsWith("admin-"))));
 
   /* ---------------------------------------------------- 3. abuse gates --- */
-  console.log("\nAbuse gates (must cost zero AI calls)");
-  const before = await prisma.request.count({ where: { shop: SHOP, customerEmail: { contains: TAG } } });
+  console.log("\nAbuse gates");
+  const before = await prisma.request.count({ where: { shop: TEST_SHOP } });
 
   const honeypot = await submit(
     submission({ email: `hp-${TAG}@example.com`, wbj_x2: "http://spam.example" }),
@@ -203,6 +221,15 @@ try {
     assert.equal(honeypot.status, 200);
     assert.equal(honeypot.body.ok, true);
   });
+
+  const legacyField = await submit(
+    submission({ email: `legacy-${TAG}@example.com`, company_website: "Acme Ltd" }),
+    { ip: "198.51.100.7" },
+  );
+  // Regression guard: "company_website" was the old honeypot name and Chrome
+  // autofill filled it, silently destroying real submissions.
+  check("a field named company_website is ignored, not fatal", () =>
+    assert.equal(legacyField.status, 200));
 
   const junk = await submit(
     submission({ email: `junk-${TAG}@example.com`, description: "aaaaaaaaaaaaaaaa" }),
@@ -216,8 +243,8 @@ try {
   );
   check("forged token rejected with 400", () => assert.equal(forged.status, 400));
 
-  // Absent token = our outage, not a tampering signal. It must NOT block a real
-  // customer — but it gets its own tight per-IP cap so it isn't a free lane.
+  // Absent token = our outage, not tampering. Must not block a real customer,
+  // but gets its own tight per-IP cap.
   const deg1 = await submit(
     { ...submission({ email: `deg1-${TAG}@example.com` }), token: "" },
     { ip: "198.51.100.6" },
@@ -240,7 +267,6 @@ try {
   );
   check("token cannot be replayed", () => assert.equal(replayed.status, 400));
 
-  // Same IP hammering: the 4th within the hour must be throttled (limit 3).
   let throttled = null;
   for (let i = 0; i < 5; i++) {
     const res = await submit(submission({ email: `flood-${TAG}-${i}@example.com` }), {
@@ -251,54 +277,104 @@ try {
   check("per-IP hourly limit throttles a flood", () =>
     assert.ok(throttled !== null && throttled <= 3, `not throttled within 4 attempts (got ${throttled})`));
 
-  const after = await prisma.request.count({ where: { shop: SHOP, customerEmail: { contains: TAG } } });
-  // Allowed to create: 1 replay-first + 2 tokenless + 3 flood-before-throttle.
+  const after = await prisma.request.count({ where: { shop: TEST_SHOP } });
+  // Allowed to create: legacy-field + 2 tokenless + replay-first + 3 flood.
   check("refused submissions created no rows", () =>
-    assert.ok(after - before <= 6, `created ${after - before} rows from abuse traffic`));
+    assert.ok(after - before <= 7, `created ${after - before} rows from abuse traffic`));
 
   /* ------------------------------------------------- 4. matching runs ---- */
-  // Off Vercel there is no waitUntil, so matching runs as a detached promise.
-  // Wait for it to actually land rather than trusting the "pending" flag.
-  console.log("\nMatching (same pipeline as staff-created requests)");
-  const deadline = Date.now() + 90_000;
-  let settled = [];
-  while (Date.now() < deadline) {
-    settled = await prisma.request.findMany({
-      where: { shop: SHOP, customerEmail: { contains: TAG }, matchState: { in: ["ok", "error"] } },
+  // The ONE check that needs the real shop: matching only proves anything
+  // against real product embeddings. One request, assigned normally, deleted
+  // below. No staff are modified.
+  console.log("\nMatching against real inventory (real shop, one request)");
+  const realRes = await submit(
+    submission({
+      email: `real-${TAG}@example.com`,
+      name: "VERIFY SCRIPT — ignore",
+      // Keep this SPECIFIC. A broad query ("diamond ring in white gold") pulled
+      // 149 candidates and burned ~3 minutes and a pile of Anthropic calls on
+      // every run. A narrow one proves the pipeline just as well, cheaply.
+      description: "Looking for a platinum eternity band with round brilliant diamonds",
+    }),
+    { ip: "203.0.113.200", shop: REAL_SHOP },
+  );
+  check("real-shop submission accepted", () => assert.equal(realRes.status, 200));
+
+  // Full retrieval + two Anthropic passes over the live catalogue. Off Vercel
+  // there is no waitUntil, so this runs as a detached promise in-process and
+  // can legitimately take a couple of minutes on a cold Neon compute.
+  const MATCH_TIMEOUT_MS = parseInt(process.env.VERIFY_MATCH_TIMEOUT_MS || "240000", 10);
+  const started = Date.now();
+  let settled = null;
+  let lastState = null;
+  while (Date.now() - started < MATCH_TIMEOUT_MS) {
+    const row = await prisma.request.findFirst({
+      where: { shop: REAL_SHOP, customerEmail: `real-${TAG}@example.com` },
       include: { matches: true },
     });
-    if (settled.length >= 3) break;
+    if (row && row.matchState !== lastState) {
+      lastState = row.matchState;
+      console.log(`  ...  ${Math.round((Date.now() - started) / 1000)}s matchState=${lastState}`);
+    }
+    if (row && (row.matchState === "ok" || row.matchState === "error")) {
+      settled = row;
+      break;
+    }
     await new Promise((r) => setTimeout(r, 3000));
   }
-  check("matching completed on customer-submitted requests", () => {
-    assert.ok(settled.length > 0, "no request reached a terminal matchState within 90s");
-    const errored = settled.filter((r) => r.matchState === "error");
-    assert.equal(errored.length, 0, `matching errored: ${errored.map((r) => r.matchError).join("; ")}`);
+  check("matching completed on a customer-submitted request", () => {
+    assert.ok(
+      settled,
+      `did not reach a terminal matchState within ${MATCH_TIMEOUT_MS / 1000}s (last state: ${lastState})`,
+    );
+    assert.notEqual(settled.matchState, "error", `matching errored: ${settled?.matchError}`);
   });
-  console.log(
-    `  INFO  ${settled.length} settled; matches: ${settled.map((r) => r.matches.length).join(", ")}` +
-      " (zero matches is a legitimate 'watching' result)",
-  );
+  if (settled) {
+    console.log(
+      `  INFO  assigned to ${settled.salespersonName}, matchState=${settled.matchState}, matches=${settled.matches.length}` +
+        " (zero matches is a legitimate 'watching' result)",
+    );
+  }
 
   /* --------------------------------------------------- 5. staff view ----- */
   console.log("\nStaff visibility");
   const forStaff = await prisma.request.findFirst({
-    where: { shop: SHOP, customerEmail: { contains: TAG }, source: "customer" },
-    include: { matches: true },
+    where: { shop: TEST_SHOP, source: "customer" },
   });
   check("staff row carries the flag, phone, and assignee", () => {
     assert.equal(forStaff.source, "customer");
     assert.ok(forStaff.customerPhone);
     assert.ok(forStaff.salespersonEmail);
   });
-  console.log(
-    `  INFO  assigned to ${forStaff.salespersonEmail}, matchState=${forStaff.matchState}, matches=${forStaff.matches.length}`,
+
+  /* ------------------------------------------------ 6. no live spillover -- */
+  console.log("\nIsolation from live data");
+  const liveCountersAfter = await liveCounterSnapshot();
+  check("live cr:* counters unchanged", () =>
+    assert.equal(
+      liveCountersAfter,
+      liveCountersBefore,
+      `changed:\n    before ${liveCountersBefore || "(none)"}\n    after  ${liveCountersAfter || "(none)"}`,
+    ));
+
+  const realStaffAfter = await realStaffSnapshot();
+  check("real salespeople untouched (active + rotation membership)", () =>
+    assert.equal(
+      realStaffAfter,
+      realStaffBefore,
+      `real staff changed:\n    before ${realStaffBefore}\n    after  ${realStaffAfter}`,
+    ));
+
+  const mine = await prisma.$queryRawUnsafe(
+    `SELECT count(*)::int AS n FROM "DailyCounter" WHERE key LIKE '${COUNTER_NS}:%'`,
   );
+  check("this run's counters landed in its own namespace", () =>
+    assert.ok(Number(mine[0].n) > 0, "no namespaced counters were written"));
 } finally {
   /* ------------------------------------------------------------ cleanup -- */
   const ids = (
     await prisma.request.findMany({
-      where: { shop: SHOP, customerEmail: { contains: TAG } },
+      where: { OR: [{ shop: TEST_SHOP }, { customerEmail: { contains: TAG } }] },
       select: { id: true },
     })
   ).map((r) => r.id);
@@ -307,16 +383,11 @@ try {
     await prisma.matchEval.deleteMany({ where: { requestId: { in: ids } } });
     await prisma.request.deleteMany({ where: { id: { in: ids } } });
   }
-  await prisma.salesperson.deleteMany({ where: { email: { contains: TAG } } });
-  // Restore exactly the people this run parked.
-  if (parkedIds.length) {
-    await prisma.salesperson.updateMany({
-      where: { id: { in: parkedIds } },
-      data: { inRotation: true },
-    });
-  }
-  await prisma.dailyCounter.deleteMany({ where: { key: { startsWith: "cr:" } } });
-  console.log(`\nCleaned up ${ids.length} request(s) and ${staff.length} test salespeople.`);
+  await prisma.salesperson.deleteMany({ where: { shop: TEST_SHOP } });
+  await prisma.rotationState.deleteMany({ where: { shop: TEST_SHOP } });
+  await prisma.dailyCounter.deleteMany({ where: { key: { startsWith: `${COUNTER_NS}:` } } });
+
+  console.log(`\nCleaned up ${ids.length} request(s) and the ${TEST_SHOP} test staff.`);
   console.log(failures === 0 ? "\nALL CHECKS PASSED" : `\n${failures} CHECK(S) FAILED`);
   await prisma.$disconnect();
   process.exit(failures === 0 ? 0 : 1);

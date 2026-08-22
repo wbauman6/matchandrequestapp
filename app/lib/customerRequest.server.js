@@ -66,6 +66,26 @@ function secret() {
   return process.env.SHOPIFY_API_SECRET || "";
 }
 
+/**
+ * Counter namespace. Production is "cr".
+ *
+ * scripts/verify-storefront-request.mjs sets CUSTOMER_REQUEST_COUNTER_NS so its
+ * traffic gets its own counters. Without that, running the verify script:
+ *   - consumed ~10 of the real 50/day global cap,
+ *   - throttled nothing but still wrote real per-IP/email limit rows,
+ *   - polluted the rejection telemetry the admin dashboard shows, and
+ *   - had to delete every `cr:*` row to clean up, wiping live customers'
+ *     rate limits and the rejection counts along with it.
+ *
+ * Read lazily, not captured at import time, so module load order can't freeze
+ * the wrong value.
+ */
+export function counterNamespace() {
+  return process.env.CUSTOMER_REQUEST_COUNTER_NS || "cr";
+}
+
+const k = (suffix) => `${counterNamespace()}:${suffix}`;
+
 // Truncated keyed hash — rate-limit counters must not become a log of shopper
 // IPs and email addresses sitting in the database.
 function tag(value) {
@@ -126,7 +146,7 @@ export async function verifyFormToken(token) {
   if (age < TOKEN_MIN_AGE_MS) return { ok: false, reason: "token_too_fast" };
 
   try {
-    const uses = await bumpCounter(`cr:nonce:${nonce}`);
+    const uses = await bumpCounter(k(`nonce:${nonce}`));
     if (uses > 1) return { ok: false, reason: "token_replayed" };
   } catch (err) {
     // Fail open on a counter outage, consistent with trackAiCall — the global
@@ -252,18 +272,18 @@ export async function checkRateLimits({ ip, email, degraded = false }) {
 
   if (degraded && ip) {
     checks.push({
-      key: `cr:nt:${tag(ip)}:${hour}`,
+      key: k(`nt:${tag(ip)}:${hour}`),
       limit: LIMITS.noTokenIpHourly,
       scope: "no_token_ip_hourly",
     });
   }
   if (ip) {
-    checks.push({ key: `cr:ip:${tag(ip)}:${hour}`, limit: LIMITS.ipHourly, scope: "ip_hourly" });
-    checks.push({ key: `cr:ip:${tag(ip)}`, limit: LIMITS.ipDaily, scope: "ip_daily" });
+    checks.push({ key: k(`ip:${tag(ip)}:${hour}`), limit: LIMITS.ipHourly, scope: "ip_hourly" });
+    checks.push({ key: k(`ip:${tag(ip)}`), limit: LIMITS.ipDaily, scope: "ip_daily" });
   }
   if (email) {
-    checks.push({ key: `cr:em:${tag(email)}:${hour}`, limit: LIMITS.emailHourly, scope: "email_hourly" });
-    checks.push({ key: `cr:em:${tag(email)}`, limit: LIMITS.emailDaily, scope: "email_daily" });
+    checks.push({ key: k(`em:${tag(email)}:${hour}`), limit: LIMITS.emailHourly, scope: "email_hourly" });
+    checks.push({ key: k(`em:${tag(email)}`), limit: LIMITS.emailDaily, scope: "email_daily" });
   }
 
   for (const { key, limit, scope } of checks) {
@@ -297,7 +317,7 @@ export async function checkRateLimits({ ip, email, degraded = false }) {
 export async function checkGlobalCap(shop) {
   let count;
   try {
-    count = await bumpCounter("cr:global");
+    count = await bumpCounter(k("global"));
   } catch (err) {
     console.error("[customerRequest] global cap counter unavailable:", err?.message || err);
     return { ok: true }; // consistent with trackAiCall; AI budget still applies
@@ -320,7 +340,7 @@ export async function checkGlobalCap(shop) {
 
 async function alertOnce(shop, count) {
   try {
-    const firstToday = await bumpCounter("cr:cap_alert");
+    const firstToday = await bumpCounter(k("cap_alert"));
     if (firstToday !== 1) return;
     const to = await alertRecipients(shop);
     await sendCustomerRequestCapAlert({ shop, count, limit: LIMITS.globalDaily, to });
@@ -360,7 +380,7 @@ export async function logRejection(shop, reason, detail = {}) {
     .join(" ");
   console.warn(`[customer-request] REJECTED reason=${reason} shop=${shop}${parts ? " " + parts : ""}`);
   try {
-    await bumpCounter(`cr:rej:${reason}`);
+    await bumpCounter(k(`rej:${reason}`));
   } catch (err) {
     console.error("[customerRequest] rejection counter unavailable:", err?.message || err);
   }
@@ -372,8 +392,8 @@ export async function logRejection(shop, reason, detail = {}) {
  */
 export async function intakeStatsToday() {
   const [accepted, ...refused] = await Promise.all([
-    getCounter("cr:global"),
-    ...REJECTION_REASONS.map((r) => getCounter(`cr:rej:${r}`)),
+    getCounter(k("global")),
+    ...REJECTION_REASONS.map((r) => getCounter(k(`rej:${r}`))),
   ]);
   const byReason = {};
   REJECTION_REASONS.forEach((r, i) => {
@@ -389,7 +409,7 @@ export async function intakeStatsToday() {
 
 /** Today's customer-submitted request count (for the admin app). */
 export async function customerRequestsToday() {
-  return getCounter("cr:global");
+  return getCounter(k("global"));
 }
 
 export { HONEYPOT_FIELD };
