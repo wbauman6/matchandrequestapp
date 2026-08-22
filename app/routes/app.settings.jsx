@@ -114,6 +114,29 @@ const btnSecondary = {
   padding: "2px 6px",
 };
 
+// Card layout (replaces the wide 7-column table that overflowed the embedded
+// admin frame). A CSS auto-fill grid is responsive with NO media queries: one
+// card per row in a narrow frame, more as it widens — nothing is ever clipped.
+const fieldRow = { display: "flex", flexDirection: "column", gap: 4 };
+const fieldLabel = {
+  fontSize: 11,
+  fontWeight: 600,
+  textTransform: "uppercase",
+  letterSpacing: "0.5px",
+  color: "#6d7175",
+};
+const saveBtn = {
+  background: "#f1f2f3",
+  border: "1px solid #c9cccf",
+  borderRadius: 6,
+  padding: "6px 12px",
+  fontSize: 12,
+  fontWeight: 600,
+  color: "#005bd3",
+  cursor: "pointer",
+  whiteSpace: "nowrap",
+};
+
 export default function SettingsPage() {
   const { salespeople } = useLoaderData();
   const nav = useNavigation();
@@ -137,7 +160,7 @@ export default function SettingsPage() {
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "1fr 1fr auto auto",
+              gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
               gap: 12,
               alignItems: "end",
             }}
@@ -227,126 +250,135 @@ export default function SettingsPage() {
             dropdown on new requests.
           </p>
         ) : (
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
-            <thead>
-              <tr style={{ background: "#f6f6f7", textAlign: "left" }}>
-                {["Name", "Email", "Role", "POS Staff ID", "Online requests", "Status", "Actions"].map((h) => (
-                  <th
-                    key={h}
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
+              gap: 16,
+            }}
+          >
+            {salespeople.map((sp) => (
+              <div
+                key={sp.id}
+                style={{
+                  border: "1px solid #e1e3e5",
+                  borderRadius: 8,
+                  padding: 16,
+                  background: sp.active ? "#fff" : "#fafbfb",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 12,
+                  minWidth: 0,
+                }}
+              >
+                {/* Name + status */}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontWeight: 700, fontSize: 15, color: "#202223", wordBreak: "break-word" }}>
+                      {sp.name}
+                    </div>
+                    <div style={{ fontSize: 13, color: "#6d7175", wordBreak: "break-all" }}>{sp.email}</div>
+                  </div>
+                  <span
                     style={{
-                      padding: "10px 16px",
+                      flexShrink: 0,
                       fontSize: 11,
                       fontWeight: 600,
                       textTransform: "uppercase",
-                      letterSpacing: "0.5px",
-                      color: "#6d7175",
+                      padding: "2px 10px",
+                      borderRadius: 12,
+                      background: sp.active ? "#e3f1df" : "#f6f6f7",
+                      color: sp.active ? "#1a7a4a" : "#616161",
                     }}
                   >
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {salespeople.map((sp) => (
-                <tr key={sp.id} style={{ borderBottom: "1px solid #e1e3e5" }}>
-                  <td style={{ padding: "12px 16px", fontWeight: 600 }}>{sp.name}</td>
-                  <td style={{ padding: "12px 16px", color: "#414547" }}>{sp.email}</td>
-                  <td style={{ padding: "12px 16px" }}>
-                    <Form method="post">
-                      <input type="hidden" name="_action" value="set-role" />
-                      <input type="hidden" name="id" value={sp.id} />
-                      <select
-                        name="role"
-                        defaultValue={sp.role}
-                        onChange={(e) => e.currentTarget.form.requestSubmit()}
-                        style={{ ...inputStyle, padding: "6px 8px", width: "auto" }}
-                      >
-                        <option value="salesperson">Salesperson</option>
-                        <option value="admin">Admin</option>
-                      </select>
-                    </Form>
-                  </td>
-                  <td style={{ padding: "12px 16px" }}>
-                    <Form method="post" style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                      <input type="hidden" name="_action" value="set-pos-id" />
-                      <input type="hidden" name="id" value={sp.id} />
-                      <input
-                        name="posStaffId"
-                        defaultValue={sp.posStaffId || ""}
-                        inputMode="numeric"
-                        placeholder="e.g. 1234567"
-                        style={{ ...inputStyle, padding: "6px 8px", width: 120 }}
-                      />
-                      <button type="submit" style={{ ...btnSecondary, color: "#005bd3" }}>
-                        Save
-                      </button>
-                    </Form>
-                  </td>
-                  <td style={{ padding: "12px 16px" }}>
-                    <Form method="post" style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                      <input type="hidden" name="_action" value="toggle-rotation" />
-                      <input type="hidden" name="id" value={sp.id} />
-                      <input
-                        type="checkbox"
-                        checked={sp.inRotation}
-                        onChange={(e) => e.currentTarget.form.requestSubmit()}
-                        aria-label={`Include ${sp.name} in the storefront request rotation`}
-                      />
-                      <span style={{ fontSize: 12, color: sp.inRotation ? "#1a7a4a" : "#6d7175" }}>
-                        {sp.inRotation ? "In rotation" : "Excluded"}
-                      </span>
-                    </Form>
+                    {sp.active ? "Active" : "Inactive"}
+                  </span>
+                </div>
+
+                {/* Role */}
+                <div style={fieldRow}>
+                  <label style={fieldLabel}>Role</label>
+                  <Form method="post">
+                    <input type="hidden" name="_action" value="set-role" />
+                    <input type="hidden" name="id" value={sp.id} />
+                    <select
+                      name="role"
+                      defaultValue={sp.role}
+                      onChange={(e) => e.currentTarget.form.requestSubmit()}
+                      style={{ ...inputStyle, padding: "6px 8px" }}
+                    >
+                      <option value="salesperson">Salesperson</option>
+                      <option value="admin">Admin</option>
+                    </select>
+                  </Form>
+                </div>
+
+                {/* POS Staff ID — one clear save action inline with the field */}
+                <div style={fieldRow}>
+                  <label style={fieldLabel}>POS Staff ID</label>
+                  <Form method="post" style={{ display: "flex", gap: 8 }}>
+                    <input type="hidden" name="_action" value="set-pos-id" />
+                    <input type="hidden" name="id" value={sp.id} />
+                    <input
+                      name="posStaffId"
+                      defaultValue={sp.posStaffId || ""}
+                      inputMode="numeric"
+                      placeholder="e.g. 1234567"
+                      style={{ ...inputStyle, padding: "6px 8px", flex: 1, minWidth: 0 }}
+                    />
+                    <button type="submit" style={saveBtn}>Save</button>
+                  </Form>
+                </div>
+
+                {/* Online requests (rotation) */}
+                <div style={fieldRow}>
+                  <label style={fieldLabel}>Online requests</label>
+                  <Form method="post" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                    <input type="hidden" name="_action" value="toggle-rotation" />
+                    <input type="hidden" name="id" value={sp.id} />
+                    <input
+                      type="checkbox"
+                      checked={sp.inRotation}
+                      onChange={(e) => e.currentTarget.form.requestSubmit()}
+                      aria-label={`Include ${sp.name} in the storefront request rotation`}
+                    />
+                    <span style={{ fontSize: 12, color: sp.inRotation ? "#1a7a4a" : "#6d7175" }}>
+                      {sp.inRotation ? "In rotation" : "Excluded"}
+                    </span>
                     {sp.inRotation && sp.lastAssignedAt && (
-                      <div style={{ fontSize: 11, color: "#8c9196", marginTop: 2 }}>
-                        Last: {new Date(sp.lastAssignedAt).toLocaleDateString()}
-                      </div>
+                      <span style={{ fontSize: 11, color: "#8c9196" }}>
+                        · last {new Date(sp.lastAssignedAt).toLocaleDateString()}
+                      </span>
                     )}
-                  </td>
-                  <td style={{ padding: "12px 16px" }}>
-                    <span
-                      style={{
-                        fontSize: 11,
-                        fontWeight: 600,
-                        textTransform: "uppercase",
-                        padding: "2px 10px",
-                        borderRadius: 12,
-                        background: sp.active ? "#e3f1df" : "#f6f6f7",
-                        color: sp.active ? "#1a7a4a" : "#616161",
+                  </Form>
+                </div>
+
+                {/* Actions */}
+                <div style={{ display: "flex", gap: 12, borderTop: "1px solid #f1f2f3", paddingTop: 12 }}>
+                  <Form method="post" style={{ display: "inline" }}>
+                    <input type="hidden" name="_action" value="toggle" />
+                    <input type="hidden" name="id" value={sp.id} />
+                    <button type="submit" style={btnSecondary}>
+                      {sp.active ? "Deactivate" : "Reactivate"}
+                    </button>
+                  </Form>
+                  <Form method="post" style={{ display: "inline" }}>
+                    <input type="hidden" name="_action" value="delete" />
+                    <input type="hidden" name="id" value={sp.id} />
+                    <button
+                      type="submit"
+                      style={{ ...btnSecondary, color: "#d72c0d" }}
+                      onClick={(e) => {
+                        if (!confirm(`Remove ${sp.name} from the salesperson list?`)) e.preventDefault();
                       }}
                     >
-                      {sp.active ? "Active" : "Inactive"}
-                    </span>
-                  </td>
-                  <td style={{ padding: "12px 16px" }}>
-                    <div style={{ display: "flex", gap: 8 }}>
-                      <Form method="post" style={{ display: "inline" }}>
-                        <input type="hidden" name="_action" value="toggle" />
-                        <input type="hidden" name="id" value={sp.id} />
-                        <button type="submit" style={btnSecondary}>
-                          {sp.active ? "Deactivate" : "Reactivate"}
-                        </button>
-                      </Form>
-                      <Form method="post" style={{ display: "inline" }}>
-                        <input type="hidden" name="_action" value="delete" />
-                        <input type="hidden" name="id" value={sp.id} />
-                        <button
-                          type="submit"
-                          style={{ ...btnSecondary, color: "#d72c0d" }}
-                          onClick={(e) => {
-                            if (!confirm(`Remove ${sp.name} from the salesperson list?`))
-                              e.preventDefault();
-                          }}
-                        >
-                          Delete
-                        </button>
-                      </Form>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                      Delete
+                    </button>
+                  </Form>
+                </div>
+              </div>
+            ))}
+          </div>
         )}
       </s-section>
     </s-page>
