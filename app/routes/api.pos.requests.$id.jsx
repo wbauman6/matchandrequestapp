@@ -1,6 +1,6 @@
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
-import { runMatchesForRequest } from "../lib/matchRunner.server";
+import { runMatchesForRequest, isMatchStalled } from "../lib/matchRunner.server";
 import { parseBudgetFromNotes } from "../lib/budget";
 
 // Per-request actions for the POS UI extension. Mirrors the admin app
@@ -50,7 +50,10 @@ async function shapeRequest(shop, id) {
     budget: r.budget,
     salespersonName: r.salespersonName,
     status: r.status,
-    matchState: r.matchState,
+    // A killed matching pass can't write its own error state, so report a
+    // stalled "pending" row as "error" — POS then shows a real outcome rather
+    // than a spinner that never resolves.
+    matchState: isMatchStalled(r) ? "error" : r.matchState,
     matchCount: r.matches.length,
     matches: r.matches,
   };

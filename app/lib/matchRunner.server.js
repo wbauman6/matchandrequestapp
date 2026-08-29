@@ -88,6 +88,44 @@ export async function runMatchesForRequest(_admin, request) {
   }
 }
 
+// How long a request may sit in matchState "pending" before we treat it as
+// stalled. A matching pass that is KILLED (Vercel's 120s function cap, a cold
+// deploy, a crashed worker) never reaches runMatchesForRequest's catch, so it
+// never gets to write matchState "error" — the row stays "pending" forever and
+// the UI shows a spinner that no refresh will ever clear. Anything older than
+// this is therefore stalled by definition, not still running.
+export const MATCH_STALL_MS = 5 * 60 * 1000;
+
+/** Is this request stuck in a pending state that nothing will ever finish? */
+export function isMatchStalled(request, now = Date.now()) {
+  if (request?.matchState !== "pending") return false;
+  const started = request.updatedAt ?? request.createdAt;
+  if (!started) return false;
+  return now - new Date(started).getTime() > MATCH_STALL_MS;
+}
+
+/**
+ * Sweep requests abandoned mid-match and flip them to "error" so the UI offers
+ * Retry instead of a permanent spinner. Returns the number reaped. Safe to run
+ * repeatedly: it only touches rows already past MATCH_STALL_MS.
+ */
+export async function reapStalledMatches(shop = null) {
+  const cutoff = new Date(Date.now() - MATCH_STALL_MS);
+  const { count } = await prisma.request.updateMany({
+    where: {
+      matchState: "pending",
+      updatedAt: { lt: cutoff },
+      ...(shop ? { shop } : {}),
+    },
+    data: {
+      matchState: "error",
+      matchError: "Matching was interrupted before it finished (timed out or the worker restarted). Retry to run it again.",
+    },
+  });
+  if (count > 0) console.warn(`[matchRunner] reaped ${count} stalled matching run(s)`);
+  return count;
+}
+
 // Records the outcome of a matching pass so the UI can distinguish a transient
 // failure ("error", offer Retry) from a genuine empty result ("ok", watching).
 async function setMatchState(requestId, state, error = null) {

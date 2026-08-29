@@ -230,15 +230,40 @@ ${NOTES_INTERPRETATION}
 Respond with ONLY a JSON object (begin with "{", no other text) giving a verdict for EVERY product id provided:
 {"results":[{"product_id":"<id>","match":true|false,"reason":"one short sentence"}]}`;
 
+// Max candidates per verify call. A broad request ("yellow gold diamond ring"
+// against an estate catalog) legitimately proposes 100+ matches; sending them
+// all in ONE call both blew the serverless deadline and TRUNCATED the response
+// at max_tokens. Truncated ids fail open (see the omitted-id rule below), so an
+// oversized batch silently degraded the double-check into a rubber stamp on
+// exactly the broad requests that needed it most. Chunks run in parallel, so
+// wall-clock stays ~one call regardless of match count.
+const VERIFY_CHUNK = 25;
+
 /**
- * Batched double-check: verifies ALL proposed matches in ONE Sonnet call (same
- * strict attribute+setting gating as the per-item pass). Returns a Set of
- * productIds that PASS. On failure returns all ids (don't drop on transient error).
+ * Batched double-check: verifies ALL proposed matches with the same strict
+ * attribute+setting gating as the per-item pass. Large sets are split into
+ * parallel chunks of VERIFY_CHUNK so no single call can truncate. Returns a Set
+ * of productIds that PASS. On failure returns all ids (don't drop on transient
+ * error) — except a budget kill switch, which propagates.
  */
 export async function verifyBatch({ description, notes, candidates }) {
   const c = getClient();
   const allIds = new Set((candidates || []).map((p) => p.productId));
   if (!c || !candidates?.length) return allIds;
+
+  if (candidates.length > VERIFY_CHUNK) {
+    const chunks = [];
+    for (let i = 0; i < candidates.length; i += VERIFY_CHUNK) {
+      chunks.push(candidates.slice(i, i + VERIFY_CHUNK));
+    }
+    const sets = await Promise.all(
+      chunks.map((chunk) => verifyBatch({ description, notes, candidates: chunk })),
+    );
+    const merged = new Set();
+    for (const s of sets) for (const id of s) merged.add(id);
+    return merged;
+  }
+
   const list = candidates.map((p) => ({
     product_id: p.productId,
     title: normalizeProductTerms(p.title || ""), // canonical vocabulary — see reasonMatches note

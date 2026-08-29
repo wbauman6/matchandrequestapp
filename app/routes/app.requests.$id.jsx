@@ -4,26 +4,37 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { sendNoteEmail } from "../lib/email.server";
-import { runMatchesForRequest } from "../lib/matchRunner.server";
+import { runMatchesForRequest, isMatchStalled, reapStalledMatches } from "../lib/matchRunner.server";
 import { parseBudgetFromNotes } from "../lib/budget";
 
 export const loader = async ({ request, params }) => {
   const { session } = await authenticate.admin(request);
-  const req = await prisma.request.findFirst({
-    where: { id: params.id, shop: session.shop },
-    include: {
-      matches: {
-        where: { declined: false },
-        // In-budget matches first, then over-budget (ranked below), each by score.
-        orderBy: [{ overBudget: "asc" }, { score: "desc" }, { createdAt: "desc" }],
+  const findReq = () =>
+    prisma.request.findFirst({
+      where: { id: params.id, shop: session.shop },
+      include: {
+        matches: {
+          where: { declined: false },
+          // In-budget matches first, then over-budget (ranked below), each by score.
+          orderBy: [{ overBudget: "asc" }, { score: "desc" }, { createdAt: "desc" }],
+        },
+        notes: {
+          orderBy: { createdAt: "asc" },
+        },
       },
-      notes: {
-        orderBy: { createdAt: "asc" },
-      },
-    },
-  });
+    });
+
+  let req = await findReq();
   if (!req) {
     throw new Response("Request not found", { status: 404 });
+  }
+  // Self-heal on view: a matching pass killed mid-flight (function timeout,
+  // deploy, crashed worker) can never write its own error state, so the row
+  // would otherwise show "Finding matches…" forever. Reap it and re-read so the
+  // page renders the actionable Retry state instead of a permanent spinner.
+  if (isMatchStalled(req)) {
+    await reapStalledMatches(session.shop);
+    req = (await findReq()) ?? req;
   }
   return { req };
 };

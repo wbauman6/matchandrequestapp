@@ -11,6 +11,7 @@
  */
 import prisma from "../db.server.js";
 import { drainProductQueue } from "../lib/productQueue.server.js";
+import { reapStalledMatches } from "../lib/matchRunner.server.js";
 
 export const loader = async ({ request }) => {
   const secret = process.env.CRON_SECRET;
@@ -18,6 +19,15 @@ export const loader = async ({ request }) => {
     const token = (request.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
     if (token !== secret) return new Response("Unauthorized", { status: 401 });
   }
+
+  // Backstop for matching runs killed mid-flight (function timeout, deploy,
+  // crashed worker). Those can never record their own failure, so without this
+  // the request shows "Finding matches…" forever. The loaders self-heal a
+  // request when someone opens it; this catches the ones nobody opens.
+  const reaped = await reapStalledMatches().catch((e) => {
+    console.error("[drain-queue] stalled-match reap failed:", e?.message || e);
+    return 0;
+  });
 
   const shops = await prisma.productQueue.groupBy({
     by: ["shop"],
@@ -35,5 +45,5 @@ export const loader = async ({ request }) => {
     results.push({ shop: s.shop, queued: s._count._all, ...drained });
   }
 
-  return Response.json({ ok: true, timestamp: new Date().toISOString(), results });
+  return Response.json({ ok: true, timestamp: new Date().toISOString(), reaped, results });
 };
