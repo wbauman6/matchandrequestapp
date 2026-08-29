@@ -11,6 +11,23 @@ const EMPTY_FORM = {
   description: "",
 };
 
+// Matches shown per page. A broad request can legitimately return 80+; rendering
+// them all is unusable on an iPad with a customer waiting.
+const MATCH_PAGE = 10;
+
+// What the request is ACTUALLY matched on: description + refinement notes, which
+// is what gets embedded server-side (see buildRequestText). Kept in sync with
+// app/lib/requestSummary.js — deliberately duplicated rather than imported,
+// because the extension is bundled as its own package and must not reach into
+// the app's source tree. Same logic lives there with unit tests.
+function matchingSummary(request) {
+  const description = String(request?.description || "").trim();
+  const notes = String(request?.matchNotes || "").trim();
+  if (!description) return notes;
+  if (!notes) return description;
+  return `${description} — ${notes}`;
+}
+
 async function authHeaders(base = {}) {
   const headers = { ...base };
   try {
@@ -59,9 +76,15 @@ function Modal() {
   const [actionBusy, setActionBusy] = useState(null); // e.g. "req:<id>" | "match:<id>"
   const [actionError, setActionError] = useState("");
 
-  // Refinement notes (live-refine matching).
+  // Refinement notes + editable description (live-refine matching).
   const [notesDraft, setNotesDraft] = useState("");
+  const [descDraft, setDescDraft] = useState("");
   const [refining, setRefining] = useState(false);
+  // Confirmation after a save, so a slow re-match doesn't read as "nothing
+  // happened" and invite a second tap.
+  const [saveNotice, setSaveNotice] = useState("");
+  // How many matches are rendered (paged — see MATCH_PAGE).
+  const [matchLimit, setMatchLimit] = useState(MATCH_PAGE);
 
   // Customer picker (search Shopify customers by name/email/phone).
   const [customer, setCustomer] = useState(null);
@@ -195,21 +218,44 @@ function Modal() {
 
   const openRequest = (r) => {
     setActionError("");
+    setSaveNotice("");
     setDetailReq(r);
     setNotesDraft(r.matchNotes || "");
+    setDescDraft(r.description || "");
+    setMatchLimit(MATCH_PAGE); // fresh request → back to the first page
     setView("detail");
   };
 
-  // Save refinement notes and re-run matching. Shows an "updating…" state, then
-  // swaps in the refreshed request (matches added/removed per the new notes).
-  async function saveNotes(r) {
+  // Open the edit screen with the current wording loaded.
+  const startEdit = (r) => {
+    setActionError("");
+    setSaveNotice("");
+    setNotesDraft(r.matchNotes || "");
+    setDescDraft(r.description || "");
+    setView("edit");
+  };
+
+  // Save the request (description and/or notes) and re-run matching. Shows an
+  // explicit confirmation with the new match count, because re-matching takes
+  // ~a minute and silence reads as failure.
+  async function saveRequest(r) {
+    const description = descDraft.trim();
+    if (!description) {
+      setActionError("Tell us what they're looking for — this can't be empty.");
+      return;
+    }
     setRefining(true);
     setActionError("");
+    setSaveNotice("");
     try {
       const res = await fetch(`/api/pos/requests/${r.id}`, {
         method: "POST",
         headers: await authHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify({ _action: "save-notes", matchNotes: notesDraft }),
+        body: JSON.stringify({
+          _action: "save-request",
+          description,
+          matchNotes: notesDraft,
+        }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data.error || !data.ok) {
@@ -218,7 +264,16 @@ function Modal() {
       if (data.request) {
         setDetailReq(data.request);
         setNotesDraft(data.request.matchNotes || "");
+        setDescDraft(data.request.description || "");
+        const n = data.request.matchCount || 0;
+        setSaveNotice(
+          n > 0
+            ? `Saved — ${n} match${n === 1 ? "" : "es"} found.`
+            : "Saved — nothing in stock yet. We'll keep watching.",
+        );
       }
+      setMatchLimit(MATCH_PAGE); // new result set → back to the first page
+      setView("detail");
       loadRequests();
     } catch (err) {
       setActionError(String(err?.message || err));
@@ -284,13 +339,20 @@ function Modal() {
   }
 
   // Open a matched product's listing on the native POS product-details screen.
+  // NOTE: this must go through `shopify.navigation` — a bare `navigation` is the
+  // browser's own Navigation API global, which has no .navigate(), so the call
+  // threw a TypeError that the catch below silently swallowed and the button
+  // did nothing.
   const openProduct = (productGid) => {
     const numId = String(productGid || "").split("/").pop();
     if (!numId) return;
     try {
-      navigation.navigate(`shopify:point-of-sale/products/${numId}`);
-    } catch {
-      // navigation may be unavailable in some contexts — no-op.
+      shopify.navigation.navigate(`shopify:point-of-sale/products/${numId}`);
+    } catch (err) {
+      // Navigation genuinely unavailable in this context — surface it rather
+      // than leaving the salesperson tapping a dead button.
+      setActionError("Couldn't open the product on this device.");
+      console.error("[pos] openProduct failed:", err?.message || err);
     }
   };
 
@@ -409,6 +471,8 @@ function Modal() {
   // ---- Request detail (matched products) ----
   if (view === "detail" && detailReq) {
     const r = detailReq;
+    const shown = r.matches.slice(0, matchLimit);
+    const remaining = r.matches.length - shown.length;
     return (
       <s-page heading={r.customerName}>
         <s-button slot="secondary-actions" onClick={() => setView("home")}>
@@ -431,12 +495,26 @@ function Modal() {
                     ) : null}
                   </s-stack>
                 ) : null}
-                {r.description ? <s-text>{r.description}</s-text> : null}
+
+                {/* LOOKING FOR — what matching is ACTUALLY running on, notes
+                    folded in. Previously the heading showed only the frozen
+                    description, so a request corrected by a note ("make it
+                    yellow gold") still read as white gold and staff thought
+                    their edit was lost. */}
+                <s-text>Looking for</s-text>
+                <s-text>{matchingSummary(r)}</s-text>
                 {r.budget != null ? <s-text>Budget: {money(r.budget)}</s-text> : null}
                 <s-text>Salesperson: {r.salespersonName}</s-text>
+
+                <s-button variant="secondary" onClick={() => startEdit(r)}>
+                  Change what they&apos;re looking for
+                </s-button>
+
+                {/* Ends the request — must NOT look like the routine save
+                    button it used to sit next to in identical blue. */}
                 {r.status !== "fulfilled" ? (
                   <s-button
-                    variant="primary"
+                    variant="secondary"
                     loading={actionBusy === `req:${r.id}`}
                     onClick={() => fulfillRequest(r)}
                   >
@@ -450,35 +528,16 @@ function Modal() {
               {actionError ? (
                 <s-text tone="critical">{actionError}</s-text>
               ) : null}
+              {saveNotice ? <s-banner tone="success" heading={saveNotice} /> : null}
 
-              {/* Refine matching — narrow, broaden, or nudge without a new request */}
-              <s-stack direction="block" gap="small">
-                <s-text-area
-                  label="Refine matching (notes)"
-                  value={notesDraft}
-                  rows={3}
-                  disabled={refining}
-                  details="Add details to narrow, broaden, or nudge matches. Saving re-runs matching. e.g. 'must be pear-shaped', 'any yellow tone is fine', 'budget up to $8,000', 'prefers vintage'."
-                  onInput={(e) => setNotesDraft(e.currentTarget.value)}
-                />
-                <s-button
-                  variant="primary"
-                  loading={refining}
-                  onClick={() => saveNotes(r)}
-                >
-                  {refining ? "Updating matches…" : "Save & re-match"}
-                </s-button>
-                {refining ? (
-                  <s-stack direction="inline" gap="small" alignItems="center">
-                    <s-spinner accessibilityLabel="Updating matches" />
-                    <s-text>Re-evaluating inventory against the refined request…</s-text>
-                  </s-stack>
-                ) : null}
-              </s-stack>
-
-              {refining ? null : r.matches.length === 0 ? (
+              {refining ? (
+                <s-stack direction="inline" gap="small" alignItems="center">
+                  <s-spinner accessibilityLabel="Updating matches" />
+                  <s-text>Saved. Finding new matches — this takes about a minute…</s-text>
+                </s-stack>
+              ) : r.matches.length === 0 ? (
                 <s-section heading="Matches">
-                  <s-banner tone="info" heading="Not in stock yet — watching" />
+                  <s-banner tone="info" heading="Nothing in stock yet" />
                   <s-text>
                     Nothing in inventory matches yet. This request stays active
                     and the salesperson is alerted when matching stock arrives.
@@ -486,13 +545,15 @@ function Modal() {
                 </s-section>
               ) : (
                 <s-section heading={`Matches (${r.matchCount})`}>
-                  {r.matches.flatMap((m, i) => {
+                  {shown.flatMap((m, i) => {
                     const conf = confInfo(m);
                     const row = (
                       <s-box key={m.id} padding="base">
                         <s-stack direction="block" gap="small">
+                          {/* Image kept — staff recognise stock visually — but
+                              smaller, so more than one match fits on screen. */}
                           {m.productImage ? (
-                            <s-box blockSize="200px">
+                            <s-box blockSize="120px">
                               <s-image
                                 src={m.productImage}
                                 alt={m.productTitle}
@@ -511,28 +572,100 @@ function Modal() {
                               {m.overBudget ? " · over budget" : ""}
                             </s-badge>
                           </s-stack>
-                          {m.reasoning ? <s-text>{m.reasoning}</s-text> : null}
-                          <s-button
-                            variant="secondary"
-                            onClick={() => openProduct(m.productId)}
-                          >
-                            Open product
-                          </s-button>
-                          <s-button
-                            variant="secondary"
-                            tone="critical"
-                            loading={actionBusy === `match:${m.id}`}
-                            onClick={() => declineMatch(m)}
-                          >
-                            Decline
-                          </s-button>
+                          {/* Actions side by side instead of two full-width
+                              buttons, so a match is a compact block. */}
+                          <s-stack direction="inline" gap="small">
+                            <s-button
+                              variant="secondary"
+                              onClick={() => openProduct(m.productId)}
+                            >
+                              Open product
+                            </s-button>
+                            <s-button
+                              variant="secondary"
+                              tone="critical"
+                              loading={actionBusy === `match:${m.id}`}
+                              onClick={() => declineMatch(m)}
+                            >
+                              Decline
+                            </s-button>
+                          </s-stack>
                         </s-stack>
                       </s-box>
                     );
                     return i === 0 ? [row] : [<s-divider key={`d-${m.id}`} />, row];
                   })}
+                  {/* 83 matches used to render at once — unscrollable on an
+                      iPad with a customer waiting. */}
+                  {remaining > 0 ? (
+                    <s-box padding="base">
+                      <s-button
+                        variant="secondary"
+                        onClick={() => setMatchLimit((n) => n + MATCH_PAGE)}
+                      >
+                        Show {remaining} more
+                      </s-button>
+                    </s-box>
+                  ) : null}
                 </s-section>
               )}
+            </s-stack>
+          </s-box>
+        </s-scroll-box>
+      </s-page>
+    );
+  }
+
+  // ---- Edit what the customer is looking for ----
+  // The description is now editable in place. A correction changes the request
+  // itself instead of being appended as a footnote that contradicts the heading.
+  if (view === "edit" && detailReq) {
+    const r = detailReq;
+    return (
+      <s-page heading="What are they looking for?">
+        <s-button slot="secondary-actions" onClick={() => setView("detail")}>
+          Back
+        </s-button>
+        <s-scroll-box>
+          <s-box padding="base">
+            <s-stack direction="block" gap="base">
+              <s-text-area
+                label="Looking for"
+                value={descDraft}
+                rows={3}
+                disabled={refining}
+                details="Edit this to correct the request — e.g. change 'white gold' to 'yellow gold'."
+                onInput={(e) => setDescDraft(e.currentTarget.value)}
+              />
+              <s-text-area
+                label="Anything to add?"
+                value={notesDraft}
+                rows={3}
+                disabled={refining}
+                details="Optional extra details, e.g. 'prefers vintage' or 'budget up to $8,000'."
+                onInput={(e) => setNotesDraft(e.currentTarget.value)}
+              />
+              {actionError ? <s-text tone="critical">{actionError}</s-text> : null}
+              <s-button
+                variant="primary"
+                loading={refining}
+                onClick={() => saveRequest(r)}
+              >
+                {refining ? "Updating…" : "Update"}
+              </s-button>
+              {refining ? (
+                <s-stack direction="inline" gap="small" alignItems="center">
+                  <s-spinner accessibilityLabel="Updating matches" />
+                  <s-text>Saved. Finding new matches — this takes about a minute…</s-text>
+                </s-stack>
+              ) : null}
+              <s-button
+                variant="secondary"
+                disabled={refining}
+                onClick={() => setView("detail")}
+              >
+                Cancel
+              </s-button>
             </s-stack>
           </s-box>
         </s-scroll-box>
@@ -637,11 +770,11 @@ function Modal() {
 
               {/* Description (required) */}
               <s-text-area
-                label="Description"
+                label="What are they looking for?"
                 value={form.description}
                 rows={4}
                 required
-                details="What the customer is looking for, in plain English."
+                details="In plain English, the way the customer said it."
                 placeholder="e.g. grand seiko watch with a round dial"
                 onInput={(e) => updateForm("description", e.currentTarget.value)}
               />
@@ -666,7 +799,7 @@ function Modal() {
                       }
                     >
                       {roster.map((s) => (
-                        <s-choice value={s.email} selected={s.email === pickedEmail}>
+                        <s-choice key={s.email} value={s.email} selected={s.email === pickedEmail}>
                           {s.name}
                           {s.email === me.email ? " (you)" : ""}
                         </s-choice>
@@ -757,7 +890,7 @@ function Modal() {
                             <s-badge tone={r.matchCount > 0 ? "success" : "neutral"}>
                               {r.matchCount > 0
                                 ? `${r.matchCount} match${r.matchCount === 1 ? "" : "es"}`
-                                : "watching"}
+                                : "Nothing in stock yet"}
                             </s-badge>
                             {r.source === "customer" ? (
                               <s-badge tone="warning">Call customer</s-badge>

@@ -70,25 +70,41 @@ export const action = async ({ request, params }) => {
     body = {};
   }
 
-  // ---- Save refinement notes + re-run matching over description + notes ----
-  if (body._action === "save-notes" || typeof body.matchNotes === "string") {
-    const matchNotes = String(body.matchNotes || "").trim() || null;
-    const parsedBudget = parseBudgetFromNotes(matchNotes);
+  // ---- Save the request (description and/or notes) + re-run matching ----
+  // "save-notes" is kept as an alias so an older installed extension build keeps
+  // working; both paths accept either field.
+  if (
+    body._action === "save-request" ||
+    body._action === "save-notes" ||
+    typeof body.matchNotes === "string" ||
+    typeof body.description === "string"
+  ) {
     const req = await prisma.request.findFirst({ where: { id: params.id, shop } });
     if (!req) return cors(Response.json({ error: "Request not found." }, { status: 404 }));
-    // Clearing embedding forces a re-embed from the combined description+notes.
-    const updated = await prisma.request.update({
-      where: { id: req.id },
-      data: {
-        matchNotes,
-        embedding: null,
-        matchState: "pending",
-        matchError: null,
-        ...(parsedBudget != null ? { budget: parsedBudget } : {}),
-      },
-    });
+
+    // Only touch fields the caller actually sent, so saving a note can't wipe
+    // the description (and vice versa).
+    const data = { embedding: null, matchState: "pending", matchError: null };
+
+    if (typeof body.description === "string") {
+      const description = body.description.trim();
+      // The description is what the whole match runs on — never let it be blanked.
+      if (!description) {
+        return cors(Response.json({ error: "Description can't be empty." }, { status: 400 }));
+      }
+      data.description = description;
+    }
+
+    if (typeof body.matchNotes === "string") {
+      data.matchNotes = body.matchNotes.trim() || null;
+      const parsedBudget = parseBudgetFromNotes(data.matchNotes);
+      if (parsedBudget != null) data.budget = parsedBudget;
+    }
+
+    // Clearing embedding (above) forces a re-embed from the new description+notes.
+    const updated = await prisma.request.update({ where: { id: req.id }, data });
     await runMatchesForRequest(null, updated).catch((err) => {
-      console.error("[pos/notes] re-match failed:", err?.message || err);
+      console.error("[pos/save] re-match failed:", err?.message || err);
     });
     const shaped = await shapeRequest(shop, req.id);
     return cors(Response.json({ ok: true, request: shaped }));
