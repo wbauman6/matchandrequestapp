@@ -213,7 +213,7 @@ async function ensureProductEmbedding(shop, product) {
  * drain refuses to run outside that window (see app/lib/dropSchedule.js) —
  * mid-week product-record churn just accumulates in the queue at zero AI cost
  * and is judged once during the next drop window. Pass { force: true }
- * (manual /api/drain-queue only) to override.
+ * (manual /api/drain-queue?force=1 only) to override.
  */
 export async function drainProductQueue(shop, { force = false } = {}) {
   const stats = {

@@ -12,6 +12,7 @@
   ],
   "crons": [
     { "path": "/api/digest", "schedule": "15 14 * * 3,6" },
-    { "path": "/api/weekly-drop", "schedule": "0 21 * * 2" }
+    { "path": "/api/weekly-drop", "schedule": "0 21 * * 2" },
+    { "path": "/api/drain-queue", "schedule": "0 8 * * *" }
   ]
 }
