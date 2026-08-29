@@ -339,19 +339,31 @@ function Modal() {
   }
 
   // Open a matched product's listing on the native POS product-details screen.
-  // NOTE: this must go through `shopify.navigation` — a bare `navigation` is the
-  // browser's own Navigation API global, which has no .navigate(), so the call
-  // threw a TypeError that the catch below silently swallowed and the button
-  // did nothing.
+  //
+  // `navigation` is a POS RUNTIME GLOBAL, not an import and not `shopify.*` —
+  // this is exactly what the Navigation API docs show:
+  //   navigation.navigate('shopify:point-of-sale/products/123')
+  // Do NOT "fix" it by reaching for shopify.navigation — that property doesn't
+  // exist and the call throws, which is what broke this button once already.
+  // (The global is declared for eslint in .eslintrc.cjs.)
+  //
+  // Navigation is only available in modal targets, and POS shows a permissions
+  // dialog instead of navigating if the staff member can't view the screen.
   const openProduct = (productGid) => {
     const numId = String(productGid || "").split("/").pop();
     if (!numId) return;
     try {
-      shopify.navigation.navigate(`shopify:point-of-sale/products/${numId}`);
+      const result = navigation.navigate(`shopify:point-of-sale/products/${numId}`);
+      // navigate() returns a promise; a rejection would otherwise be unhandled
+      // and silent.
+      if (result && typeof result.catch === "function") {
+        result.catch((err) => {
+          setActionError("Couldn't open that product on this device.");
+          console.error("[pos] openProduct navigate rejected:", err?.message || err);
+        });
+      }
     } catch (err) {
-      // Navigation genuinely unavailable in this context — surface it rather
-      // than leaving the salesperson tapping a dead button.
-      setActionError("Couldn't open the product on this device.");
+      setActionError("Couldn't open that product on this device.");
       console.error("[pos] openProduct failed:", err?.message || err);
     }
   };

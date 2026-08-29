@@ -89,6 +89,19 @@ module.exports = {
         node: true,
       },
     },
+    // POS UI extensions run in a sandbox that injects its own globals.
+    // Without these, `navigation` reports as no-undef and looks like a bug —
+    // it isn't. That false positive already caused one regression: the
+    // "Open product" button was "fixed" to shopify.navigation, which doesn't
+    // exist, and the call threw. See the Navigation API docs:
+    // https://shopify.dev/docs/api/pos-ui-extensions/latest/apis/navigation-api
+    {
+      files: ["extensions/**/src/**/*.{js,jsx}"],
+      globals: {
+        shopify: "readonly",
+        navigation: "readonly",
+      },
+    },
   ],
   globals: {
     shopify: "readonly"
