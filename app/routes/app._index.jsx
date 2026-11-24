@@ -94,6 +94,27 @@ export const action = async ({ request }) => {
     return null;
   }
 
+  // Reassign a request to a different salesperson.
+  //
+  // Website requests are handed out by rotation, which is blind to who is
+  // actually in that day or who already knows the customer. A manager needs to
+  // be able to move one without deleting and re-entering it.
+  //
+  // The salesperson is resolved from THIS shop's roster by id rather than
+  // trusting a posted name/email, so a stale or tampered form cannot assign a
+  // request to an address that was never on staff.
+  if (act === "reassign") {
+    const id = String(data.get("id"));
+    const spId = String(data.get("salespersonId") || "");
+    const sp = await prisma.salesperson.findFirst({ where: { id: spId, shop } });
+    if (!sp) return { error: "That salesperson is no longer on the list." };
+    await prisma.request.updateMany({
+      where: { id, shop },
+      data: { salespersonName: sp.name, salespersonEmail: sp.email },
+    });
+    return null;
+  }
+
   if (act === "status") {
     await prisma.request.update({
       where: { id: String(data.get("id")) },
@@ -109,7 +130,7 @@ const PRIORITY_COLOR = {
   normal: "#616161",
 };
 
-function RequestRow({ r }) {
+function RequestRow({ r, salespeople = [] }) {
   return (
     <tr style={{ borderBottom: "1px solid #e1e3e5" }}>
       <td style={{ padding: "12px 16px" }}>
@@ -178,7 +199,48 @@ function RequestRow({ r }) {
         )}
       </td>
       <td style={{ padding: "12px 16px", color: "#6d7175", fontSize: 13 }}>
-        {r.salespersonName}
+        {/* Reassignable in place. Rotation is blind to who is actually in
+            today or who already knows the customer, so a manager needs to move
+            one without re-entering it. Non-item requests are deliberately NOT
+            reassignable — nobody owns a service enquiry or spam. */}
+        {salespeople.length > 0 && (r.requestKind || "item") === "item" ? (
+          <Form method="post">
+            <input type="hidden" name="_action" value="reassign" />
+            <input type="hidden" name="id" value={r.id} />
+            <label htmlFor={`sp-${r.id}`} style={{ position: "absolute", left: -9999 }}>
+              Salesperson for {r.customerName}
+            </label>
+            <select
+              id={`sp-${r.id}`}
+              name="salespersonId"
+              defaultValue={salespeople.find((s) => s.email === r.salespersonEmail)?.id || ""}
+              onChange={(e) => e.currentTarget.form.requestSubmit()}
+              style={{
+                border: "1px solid #d7d9dc",
+                borderRadius: 6,
+                padding: "4px 6px",
+                fontSize: 13,
+                color: "#6d7175",
+                background: "#fff",
+                maxWidth: 150,
+              }}
+            >
+              {/* Present when the current owner isn't on the active roster
+                  (left the shop, or deactivated) — so the row still shows who
+                  holds it instead of silently snapping to someone else. */}
+              {!salespeople.some((s) => s.email === r.salespersonEmail) && (
+                <option value="">{r.salespersonName}</option>
+              )}
+              {salespeople.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+          </Form>
+        ) : (
+          r.salespersonName
+        )}
       </td>
       <td style={{ padding: "12px 16px", fontSize: 13, color: "#212326" }}>
         {r.budget != null ? `$${r.budget.toLocaleString()}` : <span style={{ color: "#c9cccf" }}>—</span>}
@@ -953,7 +1015,7 @@ export default function RequestsPage() {
               </thead>
               <tbody>
                 {visible.map((r) => (
-                  <RequestRow key={r.id} r={r} />
+                  <RequestRow key={r.id} r={r} salespeople={salespeople} />
                 ))}
               </tbody>
             </table>
