@@ -17,8 +17,9 @@
  * Protected by CRON_SECRET (Vercel sends Authorization: Bearer <CRON_SECRET>).
  */
 import prisma from "../db.server.js";
-import { drainProductQueue } from "../lib/productQueue.server.js";
+import { drainProductQueue, prewarmEmbeddings } from "../lib/productQueue.server.js";
 import { reapStalledMatches, retryBudgetKilledMatches } from "../lib/matchRunner.server.js";
+import { isDropWindow } from "../lib/dropSchedule.js";
 
 export const loader = async ({ request }) => {
   const secret = process.env.CRON_SECRET;
@@ -56,11 +57,31 @@ export const loader = async ({ request }) => {
 
   const results = [];
   for (const s of shops) {
+    // Pre-compute embeddings, but ONLY when the drop window is shut.
+    //
+    // This is the cheap half (Voyage) and spends no AI budget. Doing it on the
+    // other six days is what lets the weekly window spend its 90 seconds on
+    // matching instead of exhausting it on embedding round-trips — which is
+    // why every DropRun came back "partial" while the queue grew to 4,120 rows
+    // with attempts=0 across the board.
+    //
+    // Skipped inside the window so the two cannot share one 120s function and
+    // time each other out: drain already budgets 90s, and prewarm would push
+    // the invocation past Vercel's cap.
+    const windowOpen = isDropWindow();
+    const prewarmed =
+      force || windowOpen
+        ? null
+        : await prewarmEmbeddings(s.shop, { timeBudgetMs: 85_000, limit: 1000 }).catch((e) => {
+            console.error("[drain-queue] prewarm failed for", s.shop, e?.message || e);
+            return null;
+          });
+
     const drained = await drainProductQueue(s.shop, { force }).catch((e) => {
       console.error("[drain-queue] drain failed for", s.shop, e?.message || e);
       return { processed: 0, matched: 0, aborted: true };
     });
-    results.push({ shop: s.shop, queued: s._count._all, ...drained });
+    results.push({ shop: s.shop, queued: s._count._all, prewarmed, ...drained });
   }
 
   return Response.json({

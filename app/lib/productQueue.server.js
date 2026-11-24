@@ -199,6 +199,94 @@ async function ensureProductEmbedding(shop, product) {
 }
 
 /**
+ * Pre-compute embeddings for queued products, OUTSIDE the weekly drop window.
+ *
+ * Why this exists: the drop window has a 90-second budget, and embedding runs
+ * at roughly 7.4s per 100 products. A backlog of ~4,000 therefore needs ~5
+ * minutes of pure embedding — so the window was spending its entire budget on
+ * Voyage round-trips and timing out before reaching the AI matching it exists
+ * to do. Every DropRun came back "partial" and the queue grew every week:
+ * 4,120 rows, none of them ever attempted (attempts=0 across the board).
+ *
+ * Embedding is cheap (Voyage) and matching is expensive (Anthropic), so only
+ * the cheap half is moved out of the window. This adds ZERO Anthropic cost.
+ *
+ * Deliberately conservative:
+ *  - Queue rows are NOT claimed and NOT deleted. This only warms a cache; the
+ *    window drain still does the real work and remains the only thing that
+ *    matches, deletes rows, or spends AI budget.
+ *  - A newly created embedding is stored with inStock=false, so a product that
+ *    has not yet passed the drain's authoritative availability check can never
+ *    surface to a salesperson as in-stock. The drain flips it true once it has
+ *    verified the product against the Admin API.
+ *  - Existing rows keep their current inStock value.
+ */
+export async function prewarmEmbeddings(shop, { timeBudgetMs = 60_000, limit = 400 } = {}) {
+  const stats = { examined: 0, embedded: 0, unchanged: 0, failed: 0, remaining: 0 };
+  if (!hasEmbeddingKey()) return { ...stats, skipped: "no embedding key" };
+
+  const rows = await prisma.productQueue.findMany({
+    where: { shop, status: "queued" },
+    orderBy: { createdAt: "asc" },
+    take: limit,
+    select: { id: true, payload: true },
+  });
+
+  const deadline = Date.now() + timeBudgetMs;
+  for (const row of rows) {
+    if (Date.now() >= deadline) break;
+    const product = row.payload;
+    if (!product?.id) continue;
+    stats.examined++;
+
+    const text = buildProductText(product);
+    const hash = textHash(text);
+    const existing = await prisma.productEmbedding.findUnique({
+      where: { productId: product.id },
+      select: { hash: true },
+    });
+    if (existing && existing.hash === hash) {
+      stats.unchanged++;
+      continue;
+    }
+
+    const vec = await embedText(text, "document").catch(() => null);
+    if (!vec) {
+      stats.failed++;
+      continue;
+    }
+    await prisma.productEmbedding.upsert({
+      where: { productId: product.id },
+      // Only the vector and the text it was derived from. inStock is NOT set
+      // here — see the note above.
+      update: {
+        hash,
+        embedding: vec,
+        title: product.title,
+        description: product.description,
+        price: product.price,
+        image: product.image,
+      },
+      create: {
+        shop,
+        productId: product.id,
+        hash,
+        embedding: vec,
+        title: product.title,
+        description: product.description,
+        price: product.price,
+        image: product.image,
+        inStock: false,
+      },
+    });
+    stats.embedded++;
+  }
+
+  stats.remaining = await prisma.productQueue.count({ where: { shop, status: "queued" } });
+  return stats;
+}
+
+/**
  * Drain the product queue for a shop: claim → batch per request → ONE reasoning
  * call per ~40 candidates (+ one batched verify) → upsert matches + MatchEval.
  * Sends NO email — new matches surface in-app/POS immediately and are announced
