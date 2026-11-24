@@ -32,6 +32,10 @@ export const KINDS = {
   QUESTION: "question",
   PRICE: "price",
   SPAM: "spam",
+  // A real request for a real piece, but too vague to search on ("2 cool
+  // rings"). UNLIKE the other non-item kinds this one KEEPS its salesperson:
+  // it is a live lead that needs a phone call, not something to file away.
+  VAGUE: "vague",
 };
 
 export const KIND_LABEL = {
@@ -41,7 +45,17 @@ export const KIND_LABEL = {
   [KINDS.QUESTION]: "General question",
   [KINDS.PRICE]: "Asking about price",
   [KINDS.SPAM]: "Not a customer",
+  [KINDS.VAGUE]: "Needs more detail",
 };
+
+/**
+ * Kinds that still belong to a salesperson and need a phone call.
+ * "vague" is a real lead with a real customer behind it — it must not be
+ * quietly unassigned the way spam or a service enquiry is.
+ */
+export function needsCallback(kind) {
+  return kind === KINDS.VAGUE;
+}
 
 /** Work done TO a piece, rather than a piece being sought. */
 const SERVICE = [

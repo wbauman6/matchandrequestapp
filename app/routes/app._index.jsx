@@ -29,7 +29,13 @@ export const loader = async ({ request }) => {
   // so an empty category can hide its chip instead of showing "(0)".
   const counts = {
     all: requests.length,
-    nonItem: requests.filter((r) => (r.requestKind || "item") !== "item").length,
+    nonItem: requests.filter((r) => {
+      const k = r.requestKind || "item";
+      return k !== "item" && k !== "vague";
+    }).length,
+    // Real leads from real customers that are too vague to search on. Kept
+    // separate from spam/services: these need a phone call, not filing.
+    needsDetail: requests.filter((r) => (r.requestKind || "item") === "vague").length,
     website: requests.filter((r) => r.source === "customer").length,
     needsCall: requests.filter((r) => r.source === "customer" && !r.calledAt).length,
     noMatches: requests.filter((r) => r._count.matches === 0 && r.matchState === "ok").length,
@@ -765,7 +771,11 @@ export default function RequestsPage() {
 
   const FILTERS = {
     all: () => true,
-    nonItem: (r) => (r.requestKind || "item") !== "item",
+    nonItem: (r) => {
+      const k = r.requestKind || "item";
+      return k !== "item" && k !== "vague";
+    },
+    needsDetail: (r) => (r.requestKind || "item") === "vague",
     website: (r) => r.source === "customer",
     needsCall: (r) => r.source === "customer" && !r.calledAt,
     noMatches: (r) => r._count.matches === 0 && r.matchState === "ok",
@@ -773,6 +783,7 @@ export default function RequestsPage() {
   };
   const CHIPS = [
     ["all", "All", counts.all],
+    ["needsDetail", "Needs more detail", counts.needsDetail],
     ["nonItem", "Not an item request", counts.nonItem],
     ["needsCall", "Needs a call", counts.needsCall],
     ["website", "From website", counts.website],
@@ -783,6 +794,7 @@ export default function RequestsPage() {
   const EMPTY_TEXT = {
     all: "No active requests. Click \u201C+ New Request\u201D to get started.",
     nonItem: "No service enquiries, questions or spam waiting.",
+    needsDetail: "Nothing waiting on more detail from a customer.",
     needsCall: "Nobody is waiting on a callback.",
     website: "No requests have come in from the website.",
     noMatches: "Every request has found something.",

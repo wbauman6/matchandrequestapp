@@ -2,7 +2,8 @@ import { waitUntil } from "@vercel/functions";
 import prisma from "../db.server.js";
 import { runMatchesForRequest } from "./matchRunner.server.js";
 import { pickNextSalesperson } from "./rotation.server.js";
-import { classifyRequest, shouldMatch } from "./requestKind.js";
+import { classifyRequest, shouldMatch, needsCallback, KINDS } from "./requestKind.js";
+import { assessLead, describeReasons } from "./leadQuality.js";
 
 /**
  * Placeholder owner for requests nobody should be assigned.
@@ -117,14 +118,41 @@ export async function intakeCustomerRequest({ shop, body, ip, admin }) {
   // recruitment email or a cold sales pitch — they silently lose their place
   // in line for a real lead. Both spam submissions already in the live store
   // did exactly that.
-  const { kind, reason } = classifyRequest(description);
-  const isItem = shouldMatch(kind);
+  const classified = classifyRequest(description);
+  let kind = classified.kind;
+  let reason = classified.reason;
 
-  // 6. Round-robin the lead to a real person — ITEM REQUESTS ONLY. A service
+  // 5b. A real request for a real piece can still be unsearchable: "2 cool
+  // rings", "stunning earrings". Matching those wastes AI calls and shows the
+  // salesperson nothing, while the customer hears nothing back.
+  //
+  // These are diverted but NOT abandoned — unlike spam or a service enquiry,
+  // there is a live customer behind them. They keep their salesperson, who
+  // calls and rewrites the request into something searchable.
+  //
+  // Only applied to item-shaped requests: a question that happens to be short
+  // is already handled above and must not be relabelled.
+  let vagueNote = null;
+  if (kind === KINDS.ITEM) {
+    const lead = assessLead(description);
+    if (!lead.ok) {
+      kind = KINDS.VAGUE;
+      reason = describeReasons(lead.reasons);
+      vagueNote =
+        "Needs to be more specific before we can search. Call the customer and ask " +
+        "what metal and what stone, then update the request.";
+    }
+  }
+
+  const isItem = shouldMatch(kind);
+  // A vague lead still belongs to someone — it is a callback, not filing.
+  const wantsOwner = isItem || needsCallback(kind);
+
+  // 6. Round-robin the lead to a real person — ITEM and VAGUE only. A service
   // enquiry or a question is handled from the admin page; nobody owns it, and
   // it must never produce a salesperson alert.
   let assignee = null;
-  if (isItem) {
+  if (wantsOwner) {
     assignee = await pickNextSalesperson(shop);
     if (!assignee) {
       await logRejection(shop, "no_staff", {});
@@ -150,6 +178,10 @@ export async function intakeCustomerRequest({ shop, body, ip, admin }) {
       source: "customer",
       requestKind: kind,
       kindReason: isItem ? null : reason,
+      // The salesperson-facing instruction for a vague lead. Written as an
+      // action ("call and ask what metal and what stone"), not a complaint,
+      // because the person reading it has to do something with it.
+      matchNotes: vagueNote,
       // Sentinel, not null: these columns are non-null and every consumer
       // expects a string. UNASSIGNED is deliberately not an address, so a
       // digest or alert can never accidentally send to it.
