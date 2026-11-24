@@ -225,12 +225,25 @@ export async function prewarmEmbeddings(shop, { timeBudgetMs = 60_000, limit = 4
   const stats = { examined: 0, embedded: 0, unchanged: 0, failed: 0, remaining: 0 };
   if (!hasEmbeddingKey()) return { ...stats, skipped: "no embedding key" };
 
-  const rows = await prisma.productQueue.findMany({
-    where: { shop, status: "queued" },
-    orderBy: { createdAt: "asc" },
-    take: limit,
-    select: { id: true, payload: true },
-  });
+  // Select rows that actually need work, NOT simply the oldest N.
+  //
+  // Queue rows are never deleted here, so ordering by createdAt alone would
+  // hand back the same oldest N on every run: once those were embedded, each
+  // subsequent run would re-examine them, find nothing to do, and never reach
+  // the rest of the backlog. Prioritising products with no embedding row at
+  // all makes repeated runs walk forward through the queue.
+  const rows = await prisma.$queryRawUnsafe(
+    `
+    SELECT q.id, q.payload
+    FROM "ProductQueue" q
+    LEFT JOIN "ProductEmbedding" e ON e."productId" = q."productId"
+    WHERE q.shop = $1 AND q.status = 'queued'
+    ORDER BY (e."productId" IS NOT NULL), q."createdAt" ASC
+    LIMIT $2
+    `,
+    shop,
+    limit,
+  );
 
   const deadline = Date.now() + timeBudgetMs;
   for (const row of rows) {
