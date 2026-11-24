@@ -3,14 +3,34 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 
+// Requests older than this drop out of the default History view. HIDDEN, never
+// deleted: this is the record of what a customer asked for and what was sold
+// to them, and a jeweller may need it years later. "Show older" brings it
+// back, and nothing is ever removed from the database by age.
+const RECENT_MONTHS = 3;
+
 export const loader = async ({ request }) => {
   const { session } = await authenticate.admin(request);
+  const url = new URL(request.url);
+  const showAll = url.searchParams.get("all") === "1";
+
+  const cutoff = new Date();
+  cutoff.setMonth(cutoff.getMonth() - RECENT_MONTHS);
+
+  const where = { shop: session.shop, status: { in: ["fulfilled", "archived"] } };
   const requests = await prisma.request.findMany({
-    where: { shop: session.shop, status: { in: ["fulfilled", "archived"] } },
+    where: showAll ? where : { ...where, updatedAt: { gte: cutoff } },
     include: { _count: { select: { matches: true } } },
     orderBy: { updatedAt: "desc" },
   });
-  return { requests };
+
+  // Counted separately so the "Show older" control can state how many are
+  // hidden — an unlabelled toggle gives no reason to press it.
+  const olderCount = showAll
+    ? 0
+    : await prisma.request.count({ where: { ...where, updatedAt: { lt: cutoff } } });
+
+  return { requests, showAll, olderCount, months: RECENT_MONTHS };
 };
 
 export const action = async ({ request }) => {
@@ -37,14 +57,44 @@ const STATUS_STYLE = {
 };
 
 export default function HistoryPage() {
-  const { requests } = useLoaderData();
+  const { requests, showAll, olderCount, months } = useLoaderData();
 
   return (
     <s-page heading="History">
-      <s-section heading={`${requests.length} closed requests`}>
+      <s-section
+        heading={
+          showAll
+            ? `${requests.length} closed requests (all time)`
+            : `${requests.length} closed requests (last ${months} months)`
+        }
+      >
+        {/* Older requests are hidden, never deleted — this is the record of
+            what a customer asked for and what was sold to them. */}
+        {(olderCount > 0 || showAll) && (
+          <p style={{ fontSize: 13, color: "#6d7175", marginTop: 0, marginBottom: 14 }}>
+            {showAll ? (
+              <>
+                Showing everything.{" "}
+                <a href="/app/history" style={{ color: "#005bd3" }}>
+                  Show just the last {months} months
+                </a>
+              </>
+            ) : (
+              <>
+                {olderCount} older request{olderCount === 1 ? " is" : "s are"} hidden to keep
+                this list short. Nothing is ever deleted.{" "}
+                <a href="/app/history?all=1" style={{ color: "#005bd3" }}>
+                  Show older
+                </a>
+              </>
+            )}
+          </p>
+        )}
         {requests.length === 0 ? (
           <p style={{ color: "#6d7175", textAlign: "center", padding: "40px 0", margin: 0 }}>
-            No fulfilled or archived requests yet.
+            {olderCount > 0
+              ? `Nothing closed in the last ${months} months. ${olderCount} older request${olderCount === 1 ? "" : "s"} are hidden.`
+              : "No fulfilled or archived requests yet."}
           </p>
         ) : (
           <div style={{ overflowX: "auto" }}>
