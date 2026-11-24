@@ -5,6 +5,7 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { runMatchesForRequest } from "../lib/matchRunner.server";
 import { intakeStatsToday } from "../lib/customerRequest.server";
+import { KIND_LABEL } from "../lib/requestKind.js";
 
 export const loader = async ({ request }) => {
   const { session } = await authenticate.admin(request);
@@ -24,7 +25,17 @@ export const loader = async ({ request }) => {
     intakeStatsToday().catch(() => null),
   ]);
   const hasAnthropicKey = Boolean(process.env.ANTHROPIC_API_KEY);
-  return { requests, salespeople, hasAnthropicKey, intake };
+  // Counts drive the filter chips. Computed here rather than in the component
+  // so an empty category can hide its chip instead of showing "(0)".
+  const counts = {
+    all: requests.length,
+    nonItem: requests.filter((r) => (r.requestKind || "item") !== "item").length,
+    website: requests.filter((r) => r.source === "customer").length,
+    needsCall: requests.filter((r) => r.source === "customer" && !r.calledAt).length,
+    noMatches: requests.filter((r) => r._count.matches === 0 && r.matchState === "ok").length,
+    problems: requests.filter((r) => r.matchState === "error").length,
+  };
+  return { requests, salespeople, hasAnthropicKey, intake, counts };
 };
 
 export const action = async ({ request }) => {
@@ -67,6 +78,22 @@ export const action = async ({ request }) => {
     await prisma.request.update({ where: { id: r.id }, data: { pinned: !r.pinned } });
   }
 
+  // Record that a salesperson actually phoned a website customer. Reversible:
+  // a mistap on the wrong row must not be permanent. `source` is deliberately
+  // left alone — "came from the website" is history, "has been called" is
+  // current state, and conflating them loses one of the two.
+  if (act === "mark-called") {
+    const id = String(data.get("id"));
+    const undo = data.get("undo") === "1";
+    await prisma.request.updateMany({
+      where: { id, shop },
+      data: undo
+        ? { calledAt: null, calledBy: null }
+        : { calledAt: new Date(), calledBy: String(data.get("by") || "").slice(0, 80) || null },
+    });
+    return null;
+  }
+
   if (act === "status") {
     await prisma.request.update({
       where: { id: String(data.get("id")) },
@@ -94,11 +121,17 @@ function RequestRow({ r }) {
           >
             {r.customerName}
           </Link>
-          {/* Submitted by the shopper on the storefront, not taken by a
-              salesperson — nobody has spoken to them yet. */}
+          {/* Submitted by the shopper on the storefront. "Call customer" used
+              to show forever, so nothing distinguished "needs calling" from
+              "already called" — three people could ring the same customer, or
+              nobody would, each assuming someone had. */}
           {r.source === "customer" && (
             <span
-              title="Submitted by the customer on the storefront — call them"
+              title={
+                r.calledAt
+                  ? `Called${r.calledBy ? ` by ${r.calledBy}` : ""} on ${new Date(r.calledAt).toLocaleString()}`
+                  : "Submitted by the customer on the storefront — call them"
+              }
               style={{
                 marginLeft: 6,
                 fontSize: 10,
@@ -107,11 +140,31 @@ function RequestRow({ r }) {
                 letterSpacing: "0.5px",
                 padding: "2px 8px",
                 borderRadius: 10,
-                background: "#fff5ea",
-                color: "#a85100",
+                background: r.calledAt ? "#e3f1df" : "#fff5ea",
+                color: r.calledAt ? "#1a7a4a" : "#a85100",
               }}
             >
-              Call customer
+              {r.calledAt ? "Called" : "Call customer"}
+            </span>
+          )}
+          {/* Not a request for inventory — a service, question, buying enquiry
+              or spam. Nobody owns it and it was never matched. */}
+          {(r.requestKind || "item") !== "item" && (
+            <span
+              title={`Not an item request (${r.requestKind}) — no salesperson assigned, not matched`}
+              style={{
+                marginLeft: 6,
+                fontSize: 10,
+                fontWeight: 700,
+                textTransform: "uppercase",
+                letterSpacing: "0.5px",
+                padding: "2px 8px",
+                borderRadius: 10,
+                background: "#eef0f2",
+                color: "#5c5f62",
+              }}
+            >
+              {KIND_LABEL[r.requestKind] || r.requestKind}
             </span>
           )}
         </div>
@@ -169,6 +222,22 @@ function RequestRow({ r }) {
       </td>
       <td style={{ padding: "12px 16px" }}>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {/* Only website requests need a callback — a counter request was
+              taken with the customer standing there. */}
+          {r.source === "customer" && (
+            <Form method="post">
+              <input type="hidden" name="_action" value="mark-called" />
+              <input type="hidden" name="id" value={r.id} />
+              {r.calledAt && <input type="hidden" name="undo" value="1" />}
+              <button
+                type="submit"
+                style={{ ...actionBtn, color: r.calledAt ? "#6d7175" : "#a85100", fontWeight: r.calledAt ? 400 : 600 }}
+                title={r.calledAt ? "Undo — mark as not called" : "Mark that you phoned this customer"}
+              >
+                {r.calledAt ? "Undo called" : "Mark called"}
+              </button>
+            </Form>
+          )}
           <Form method="post">
             <input type="hidden" name="_action" value="pin" />
             <input type="hidden" name="id" value={r.id} />
@@ -620,13 +689,43 @@ function StorefrontIntake({ intake }) {
 }
 
 export default function RequestsPage() {
-  const { requests, salespeople, intake } = useLoaderData();
+  const { requests, salespeople, intake, counts } = useLoaderData();
   const nav = useNavigation();
   const [showForm, setShowForm] = useState(false);
   const [description, setDescription] = useState("");
   const [salespersonId, setSalespersonId] = useState("");
   const [useManualSp, setUseManualSp] = useState(salespeople.length === 0);
+  // Which slice of the list is showing. Filtering client-side from the already
+  // loaded rows: the list is small and a round trip per chip would be slower
+  // than the filter itself.
+  const [filter, setFilter] = useState("all");
   const submitting = nav.state === "submitting";
+
+  const FILTERS = {
+    all: () => true,
+    nonItem: (r) => (r.requestKind || "item") !== "item",
+    website: (r) => r.source === "customer",
+    needsCall: (r) => r.source === "customer" && !r.calledAt,
+    noMatches: (r) => r._count.matches === 0 && r.matchState === "ok",
+    problems: (r) => r.matchState === "error",
+  };
+  const CHIPS = [
+    ["all", "All", counts.all],
+    ["nonItem", "Not an item request", counts.nonItem],
+    ["needsCall", "Needs a call", counts.needsCall],
+    ["website", "From website", counts.website],
+    ["noMatches", "Nothing found yet", counts.noMatches],
+    ["problems", "Problems", counts.problems],
+  ];
+  const visible = requests.filter(FILTERS[filter] || FILTERS.all);
+  const EMPTY_TEXT = {
+    all: "No active requests. Click \u201C+ New Request\u201D to get started.",
+    nonItem: "No service enquiries, questions or spam waiting.",
+    needsCall: "Nobody is waiting on a callback.",
+    website: "No requests have come in from the website.",
+    noMatches: "Every request has found something.",
+    problems: "Nothing is stuck \u2014 all matching ran cleanly.",
+  };
 
   const selectedSp = salespeople.find((s) => s.id === salespersonId);
 
@@ -795,10 +894,37 @@ export default function RequestsPage() {
         </s-section>
       )}
 
-      <s-section heading={`Active Requests (${requests.length})`}>
-        {requests.length === 0 ? (
+      <s-section heading={`Active Requests (${visible.length})`}>
+        {/* Filter chips. A chip with nothing behind it is hidden rather than
+            shown greyed — an always-empty filter is noise on a busy screen. */}
+        <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+          {CHIPS.filter(([key, , n]) => key === "all" || n > 0).map(([key, label, n]) => {
+            const on = filter === key;
+            const urgent = key === "problems" || key === "needsCall";
+            return (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setFilter(key)}
+                style={{
+                  border: `1px solid ${on ? (urgent ? "#a85100" : "#005bd3") : "#c9cccf"}`,
+                  background: on ? (urgent ? "#fff5ea" : "#f1f8ff") : "#fff",
+                  color: on ? (urgent ? "#a85100" : "#005bd3") : "#414547",
+                  borderRadius: 20,
+                  padding: "5px 14px",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                {label} ({n})
+              </button>
+            );
+          })}
+        </div>
+        {visible.length === 0 ? (
           <p style={{ color: "#6d7175", textAlign: "center", padding: "40px 0", margin: 0 }}>
-            No active requests. Click &quot;+ New Request&quot; to get started.
+            {EMPTY_TEXT[filter] || EMPTY_TEXT.all}
           </p>
         ) : (
           <div style={{ overflowX: "auto" }}>
@@ -826,7 +952,7 @@ export default function RequestsPage() {
                 </tr>
               </thead>
               <tbody>
-                {requests.map((r) => (
+                {visible.map((r) => (
                   <RequestRow key={r.id} r={r} />
                 ))}
               </tbody>
