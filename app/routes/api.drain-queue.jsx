@@ -77,7 +77,26 @@ export const loader = async ({ request }) => {
             return null;
           });
 
-    const drained = await drainProductQueue(s.shop, { force }).catch((e) => {
+    // Catch-up mode (opt-in, QUEUE_CATCHUP=1).
+    //
+    // The weekly window exists so a webhook flood can't fan out thousands of
+    // AI calls. Measured against this store's real data, that fear does not
+    // match the numbers: of 199,545 (request x product) pairs in the backlog,
+    // 142k fall below the retrieval gate, 39k were already judged, and 10k are
+    // outside budget — leaving ~8,800 candidates, about 220 batched reasoning
+    // calls to clear the whole thing against a 1,500/day cap.
+    //
+    // So the backlog was never expensive, only starved: one 90-second window a
+    // week cannot get through it. With this set, the daily cron also drains,
+    // which clears the backlog in days instead of months. The existing AI
+    // budget counter remains the real circuit breaker, so the worst case is
+    // still bounded by ANTHROPIC_DAILY_CALL_LIMIT.
+    //
+    // Default OFF: turning this on changes when money is spent, which is the
+    // merchant's call, not a default.
+    const catchUp = process.env.QUEUE_CATCHUP === "1" && !windowOpen && !force;
+
+    const drained = await drainProductQueue(s.shop, { force: force || catchUp }).catch((e) => {
       console.error("[drain-queue] drain failed for", s.shop, e?.message || e);
       return { processed: 0, matched: 0, aborted: true };
     });
@@ -90,6 +109,7 @@ export const loader = async ({ request }) => {
     reaped,
     requeued,
     forced: force,
+    catchUp: process.env.QUEUE_CATCHUP === "1",
     results,
   });
 };

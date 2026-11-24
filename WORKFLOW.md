@@ -85,9 +85,20 @@ newton"), and those are exactly the cases that break.
 
 ## Known state
 
-- Live store: ~5,400 embedded products; **~4,100 products sitting in
-  `ProductQueue`** waiting to be embedded. This backlog is why some requests
-  find nothing, and is the largest open issue.
+- Live store: ~5,700 embedded products. Every queued product now has a current
+  embedding (a one-off backfill cleared the last 287).
+- `ProductQueue` holds ~3,800 products awaiting **matching**, not embedding.
+  Measured cost to clear it: ~8,800 (request x product) candidates survive the
+  retrieval gate, which is about **220 batched reasoning calls** — comfortably
+  under one day's cap. The backlog was never expensive, only starved: one
+  90-second window a week cannot get through it.
+- `QUEUE_CATCHUP=1` lets the daily cron drain as well as the weekly window,
+  which clears that backlog in days instead of months. **Default off**,
+  because it changes when money is spent. The AI budget counter remains the
+  circuit breaker either way.
 - AI call cap is `ANTHROPIC_DAILY_CALL_LIMIT`, currently 1500. It was 500 and
-  was being hit; classification should cut real usage, so re-measure before
+  was being hit, partly by junk: one question generated 113 matches and one
+  soldering job 55. Those are now classified out, so re-measure before
   treating 1500 as permanent.
+- Requests carry a `requestKind`. Existing rows were backfilled once: 57 item,
+  2 buying, 2 service, 2 spam, 1 question, 1 price.
