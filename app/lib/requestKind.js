@@ -155,6 +155,23 @@ export const DESIGNER_BRANDS = [
 ];
 
 /**
+ * Misspellings seen in real submissions. Staff type these at speed on a POS
+ * iPad, and a brand typed wrong is still a brand — without these, "Van clef"
+ * and "LALAUNIS" land in the appraiser's queue as though nobody knew what they
+ * were. Add to this list rather than loosening the matcher: fuzzy matching a
+ * short brand name against free jewelry text produces false positives that
+ * silently REMOVE real work from the queue.
+ */
+const BRAND_MISSPELLINGS = [
+  "van clef", "van cleff", "vancleef", "van cleef arpels", "vca arpels",
+  "lalaunis", "lalounis", "laounis",
+  "yurmann", "david yurmen", "tiffanys", "tiffany's", "tifany",
+  "cartiere", "cartier's", "bulgary", "bvlgary",
+  "mikomoto", "mikimotto", "rolexx", "role x",
+  "e newton", "enewtons", "john hardey", "roberto coins",
+];
+
+/**
  * Model names that identify a brand without naming it. A salesperson writing
  * "18k yellow Gold Love Bracelet" means Cartier; the appraiser does not need
  * to identify it, so it must not land in their queue.
@@ -182,6 +199,7 @@ export function namesDesignerBrand(description) {
   const t = String(description || "").toLowerCase();
   return (
     DESIGNER_BRANDS.some((b) => t.includes(b)) ||
+    BRAND_MISSPELLINGS.some((b) => t.includes(b)) ||
     DESIGNER_MODELS.some((m) => t.includes(m))
   );
 }

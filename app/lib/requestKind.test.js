@@ -96,6 +96,15 @@ test("unsigned estate pieces are NOT designer — these are the appraiser's queu
   }
 });
 
+test("misspelled brands are still brands (real submissions)", () => {
+  // Both of these landed in the appraiser queue before this was handled.
+  assert.equal(namesDesignerBrand("Van clef"), true);
+  assert.equal(namesDesignerBrand("ESTATE LALAUNIS MENS CUFFLINKS".toLowerCase()), true);
+  assert.equal(namesDesignerBrand("tiffanys bracelet"), true);
+  // The spoken form, before normalization has a chance to run.
+  assert.equal(namesDesignerBrand("silver e newton"), true);
+});
+
 test("spam is checked before other kinds (a recruiter may mention jewelry)", () => {
   assert.equal(kind("Hi, are you hiring? I have 20 years of experience in the jewelry industry and can help your store"), KINDS.SPAM);
 });

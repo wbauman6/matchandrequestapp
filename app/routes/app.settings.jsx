@@ -27,9 +27,11 @@ export const action = async ({ request }) => {
     }
     try {
       await prisma.salesperson.create({
-        // Storefront requests rotate across salespeople by default; admins are
-        // opted out on create and can opt themselves back in below.
-        data: { shop: session.shop, name, email, role, inRotation: role !== "admin" },
+        // Storefront requests rotate across salespeople by default. Admins and
+        // appraisers are opted out on create — an appraiser identifies and
+        // prices stock, they don't work the floor — and either can opt back in
+        // below if they do also sell.
+        data: { shop: session.shop, name, email, role, inRotation: role === "salesperson" },
       });
     } catch (err) {
       if (err.code === "P2002") {
@@ -197,6 +199,7 @@ export default function SettingsPage() {
                 style={inputStyle}
               >
                 <option value="salesperson">Salesperson</option>
+                <option value="appraiser">Appraiser</option>
                 <option value="admin">Admin</option>
               </select>
             </div>
@@ -308,6 +311,7 @@ export default function SettingsPage() {
                       style={{ ...inputStyle, padding: "6px 8px" }}
                     >
                       <option value="salesperson">Salesperson</option>
+                      <option value="appraiser">Appraiser</option>
                       <option value="admin">Admin</option>
                     </select>
                   </Form>
