@@ -626,7 +626,18 @@ export const EQUIVALENTS = [
   { from: /\bdate[\s-]+just\b(?!\s*\d)|\bdatejust\s?(\d{2})\b|\bdj\s?(\d{2})\b|\bdj\b/gi, to: "Datejust $1$2", scope: "request" },
   { from: /\bday[\s-]+date\b(?!\s*\d)|\bday-date\s?(\d{2})\b|\bdaydate\b|\bdd\s?(\d{2})\b|\bpresident(?:ial)?\b(?![\s-]*bracelet)|\brolex\s+prez\b|\bprezzy\b/gi, to: "Day-Date $1$2", scope: "request" },
   { from: /\bpepsi\b(?=\s*(?:bezel|gmt|rolex|,|$))(?:\s+bezel)?(?:\s+gmt(?:[\s-]*master)?(?:\s+(?:ii|2))?)?/gi, to: "GMT-Master II red and blue bezel", scope: "request" },
-  { from: /\bbatman\b(?=\s*(?:bezel|gmt|rolex|,|$))(?:\s+bezel)?(?:\s+gmt(?:[\s-]*master)?(?:\s+(?:ii|2))?)?|\bbatgirl\b/gi, to: "GMT-Master II blue and black bezel", scope: "request" },
+  // "Batman" and "Batgirl" are the SAME reference (126710BLNR) with the same
+  // blue-and-black bezel. The bracelet is the only difference: Oyster is the
+  // Batman, Jubilee is the Batgirl. They must never normalize to the same
+  // text — doing so erases the one distinguishing feature and makes each a
+  // confident false match for the other.
+  //
+  // This is not hypothetical: a salesperson reported exactly that. A request
+  // for a Batgirl matched an Oyster-bracelet Batman at score 89 / high
+  // confidence, and the AI justified it as "the 'Batgirl' black/blue bezel
+  // variant" — a bezel both watches share.
+  { from: /\bbatman\b(?=\s*(?:bezel|gmt|rolex|,|$))(?:\s+bezel)?(?:\s+gmt(?:[\s-]*master)?(?:\s+(?:ii|2))?)?/gi, to: "GMT-Master II blue and black bezel Oyster bracelet", scope: "request" },
+  { from: /\bbatgirl\b/gi, to: "GMT-Master II blue and black bezel Jubilee bracelet", scope: "request" },
   { from: /\bcoke\b(?=\s*(?:bezel|gmt|rolex|,|$))(?:\s+bezel)?(?:\s+gmt(?:[\s-]*master)?(?:\s+(?:ii|2))?)?/gi, to: "GMT-Master II red and black bezel", scope: "request" },
   { from: /\broot[\s-]*beer\b(?=\s*(?:bezel|gmt|rolex|,|$))(?:\s+bezel)?(?:\s+gmt(?:[\s-]*master)?(?:\s+(?:ii|2))?)?/gi, to: "GMT-Master II brown and black bezel", scope: "request" },
   { from: /\bsprite\b(?=\s*(?:bezel|gmt|rolex|,|$))(?:\s+bezel)?(?:\s+gmt(?:[\s-]*master)?(?:\s+(?:ii|2))?)?/gi, to: "GMT-Master II green and black bezel", scope: "request" },
@@ -1393,7 +1404,7 @@ export const RELATED_TERMS = [
   { terms: ["Speedmaster Professional", "chronograph"], note: "Speedmaster is a chronograph" },
   { terms: ["Seamaster Professional", "dive watch"], note: "Seamaster is a dive watch" },
   { terms: ["Royal Oak", "Patek Philippe Nautilus"], note: "both Genta steel sports — DIFFERENT brands; hard gate; listed so AI does NOT substitute" },
-  { terms: ["Jubilee bracelet", "Oyster bracelet"], note: "both Rolex bracelets; five-link vs. three-link" },
+  { terms: ["Jubilee bracelet", "Oyster bracelet"], note: "both Rolex bracelets, but NOT interchangeable: on a GMT-Master II 126710BLNR the Oyster is the 'Batman' and the Jubilee is the 'Batgirl'. Do not offer one for the other." },
   { terms: ["Oyster bracelet", "President bracelet"], note: "both Rolex bracelets" },
   { terms: ["leather strap", "NATO strap"], note: "both aftermarket-friendly straps" },
   { terms: ["rubber strap", "NATO strap"], note: "both sport straps" },

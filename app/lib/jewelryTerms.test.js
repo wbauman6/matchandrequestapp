@@ -1089,3 +1089,26 @@ test("RELATED_TERMS never pair across hard gates by rewriting (terms are stable 
   }
   assert.deepEqual(failures, [], JSON.stringify(failures, null, 2));
 });
+
+test("REGRESSION: Batman and Batgirl never normalize to the same text", () => {
+  // Same reference (126710BLNR), same blue/black bezel. The BRACELET is the
+  // only difference: Oyster = Batman, Jubilee = Batgirl. Collapsing them made
+  // each a confident false match for the other — reported from the shop floor
+  // after a Batgirl request matched an Oyster-bracelet Batman at score 89.
+  const batman = normalizeRequestTerms("Mens rolex GMT-MASTER II 126710BLNR BATMAN");
+  const batgirl = normalizeRequestTerms("Mens rolex GMT-MASTER II 126710BLNR BATGIRL");
+
+  assert.notEqual(batman, batgirl, "Batman and Batgirl must not normalize identically");
+  assert.match(batman, /Oyster bracelet/i);
+  assert.match(batgirl, /Jubilee bracelet/i);
+  assert.doesNotMatch(batman, /Jubilee/i);
+  assert.doesNotMatch(batgirl, /Oyster/i);
+
+  // Both still resolve the shared bezel, so neither loses real signal.
+  for (const s of [batman, batgirl]) assert.match(s, /blue and black bezel/i);
+});
+
+test("other GMT bezel nicknames still resolve", () => {
+  assert.match(normalizeRequestTerms("pepsi gmt"), /red and blue bezel/i);
+  assert.match(normalizeRequestTerms("coke bezel"), /red and black bezel/i);
+});
