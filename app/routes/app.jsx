@@ -23,6 +23,7 @@ export default function App() {
         <s-link href="/app/history">History</s-link>
         <s-link href="/app/drops">Drops</s-link>
         <s-link href="/app/settings">Settings</s-link>
+        <s-link href="/app/guide">Guide</s-link>
       </s-app-nav>
       <Outlet />
     </AppProvider>
