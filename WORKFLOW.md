@@ -92,10 +92,11 @@ newton"), and those are exactly the cases that break.
   retrieval gate, which is about **220 batched reasoning calls** — comfortably
   under one day's cap. The backlog was never expensive, only starved: one
   90-second window a week cannot get through it.
-- `QUEUE_CATCHUP=1` lets the daily cron drain as well as the weekly window,
-  which clears that backlog in days instead of months. **Default off**,
-  because it changes when money is spent. The AI budget counter remains the
-  circuit breaker either way.
+- Catch-up draining is **ON**: the daily cron drains on the six non-window
+  days, so the backlog clears in days instead of months and the Tuesday
+  window only has that week's new stock to judge. Set `QUEUE_CATCHUP=0` to
+  turn it off. `ANTHROPIC_DAILY_CALL_LIMIT` is the circuit breaker either
+  way.
 - AI call cap is `ANTHROPIC_DAILY_CALL_LIMIT`, currently 1500. It was 500 and
   was being hit, partly by junk: one question generated 113 matches and one
   soldering job 55. Those are now classified out, so re-measure before
