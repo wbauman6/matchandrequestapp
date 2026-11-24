@@ -85,6 +85,9 @@ function Modal() {
   const [saveNotice, setSaveNotice] = useState("");
   // How many matches are rendered (paged — see MATCH_PAGE).
   const [matchLimit, setMatchLimit] = useState(MATCH_PAGE);
+  // Which slice of the list the salesperson is looking at. Defaults to "open"
+  // so fulfilled work never clutters the day-to-day view.
+  const [posFilter, setPosFilter] = useState("open");
 
   // Customer picker (search Shopify customers by name/email/phone).
   const [customer, setCustomer] = useState(null);
@@ -306,6 +309,40 @@ function Modal() {
     }
   }
 
+  // Record that this salesperson phoned a website customer. Unlike fulfilling,
+  // this does NOT leave the screen — they are usually still on the phone, and
+  // yanking the request away mid-call would lose their place.
+  async function markCalled(r, undo) {
+    setActionBusy(`call:${r.id}`);
+    setActionError("");
+    try {
+      const res = await fetch(`/api/pos/requests/${r.id}`, {
+        method: "POST",
+        headers: await authHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          _action: "mark-called",
+          undo: undo ? 1 : 0,
+          staffMemberId: boot.staffMemberId ?? "",
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.error || !data.ok) {
+        throw new Error(data.error || `Server returned ${res.status}`);
+      }
+      // detailReq is a snapshot taken when the row was tapped, so refreshing
+      // the list alone would leave this screen still saying "call the
+      // customer" right after they tapped "I called them".
+      setDetailReq((prev) =>
+        prev && prev.id === r.id ? { ...prev, calledAt: data.calledAt } : prev,
+      );
+      await loadRequests();
+    } catch (err) {
+      setActionError(String(err?.message || err));
+    } finally {
+      setActionBusy(null);
+    }
+  }
+
   // Decline a single match — same fields the admin app sets (declined + read).
   async function declineMatch(m) {
     setActionBusy(`match:${m.id}`);
@@ -498,13 +535,24 @@ function Modal() {
                     to the shopper yet — lead with the callback details. */}
                 {r.source === "customer" ? (
                   <s-stack direction="block" gap="small">
-                    <s-badge tone="warning">Submitted online — call the customer</s-badge>
+                    <s-badge tone={r.calledAt ? "success" : "warning"}>
+                      {r.calledAt ? "Already called" : "Submitted online — call the customer"}
+                    </s-badge>
                     {r.customerPhone ? (
                       <s-text>Phone: {r.customerPhone}</s-text>
                     ) : null}
                     {r.customerEmail ? (
                       <s-text>Email: {r.customerEmail}</s-text>
                     ) : null}
+                    {/* Without this the badge said "call them" forever, so
+                        nothing told the next person it had been done. */}
+                    <s-button
+                      variant="secondary"
+                      loading={actionBusy === `call:${r.id}`}
+                      onClick={() => markCalled(r, Boolean(r.calledAt))}
+                    >
+                      {r.calledAt ? "Undo — not called yet" : "I called them"}
+                    </s-button>
                   </s-stack>
                 ) : null}
 
@@ -847,7 +895,26 @@ function Modal() {
   }
 
   // ---- Home: identity + role-filtered request list ----
-  const requests = reqState.requests || [];
+  const allRequests = reqState.requests || [];
+
+  // Working filters for the shop floor. Fulfilled requests are INCLUDED in the
+  // payload (they used to vanish entirely) but kept out of the default view,
+  // so "what did I sell her last time?" is one tap away without cluttering the
+  // list of things still being worked.
+  const POS_FILTERS = {
+    open: (r) => r.status !== "fulfilled",
+    needCall: (r) => r.source === "customer" && !r.calledAt && r.status !== "fulfilled",
+    toCheck: (r) => (r.unreadCount || 0) > 0 && r.status !== "fulfilled",
+    fulfilled: (r) => r.status === "fulfilled",
+  };
+  const posCounts = {
+    open: allRequests.filter(POS_FILTERS.open).length,
+    needCall: allRequests.filter(POS_FILTERS.needCall).length,
+    toCheck: allRequests.filter(POS_FILTERS.toCheck).length,
+    fulfilled: allRequests.filter(POS_FILTERS.fulfilled).length,
+  };
+  const requests = allRequests.filter(POS_FILTERS[posFilter] || POS_FILTERS.open);
+
   return (
     <s-page heading="Match and Request">
       <s-button slot="secondary-actions" variant="primary" onClick={startNew}>
@@ -871,6 +938,28 @@ function Modal() {
               Refresh
             </s-button>
 
+            {/* Filters. Plain words, not jargon — these are read mid-transaction
+                by people who are not looking for a puzzle. A filter with
+                nothing behind it is hidden rather than shown empty. */}
+            <s-stack direction="inline" gap="small">
+              {[
+                ["open", "Working on", posCounts.open],
+                ["needCall", "Need to call", posCounts.needCall],
+                ["toCheck", "New matches", posCounts.toCheck],
+                ["fulfilled", "Sold", posCounts.fulfilled],
+              ]
+                .filter(([key, , n]) => key === "open" || n > 0)
+                .map(([key, label, n]) => (
+                  <s-button
+                    key={key}
+                    variant={posFilter === key ? "primary" : "secondary"}
+                    onClick={() => setPosFilter(key)}
+                  >
+                    {label} ({n})
+                  </s-button>
+                ))}
+            </s-stack>
+
             {reqState.status === "loading" && requests.length === 0 ? (
               <s-stack direction="inline" gap="base" alignItems="center">
                 <s-spinner accessibilityLabel="Loading requests" />
@@ -882,7 +971,17 @@ function Modal() {
               </s-text>
             ) : requests.length === 0 ? (
               <s-section heading="Requests">
-                <s-text>No active requests yet. Tap “New request” to add one.</s-text>
+                {/* Name the filter, so an empty view never reads as "all my
+                    requests are gone". */}
+                <s-text>
+                  {posFilter === "needCall"
+                    ? "Nobody is waiting on a call."
+                    : posFilter === "toCheck"
+                      ? "No new matches to look at."
+                      : posFilter === "fulfilled"
+                        ? "Nothing sold in the last 90 days."
+                        : "No active requests yet. Tap \u201CNew request\u201D to add one."}
+                </s-text>
               </s-section>
             ) : (
               <s-section
@@ -905,11 +1004,16 @@ function Modal() {
                                 : "Nothing in stock yet"}
                             </s-badge>
                             {r.source === "customer" ? (
-                              <s-badge tone="warning">Call customer</s-badge>
+                              <s-badge tone={r.calledAt ? "success" : "warning"}>
+                                {r.calledAt ? "Called" : "Call customer"}
+                              </s-badge>
                             ) : null}
                           </s-stack>
                           {r.source === "customer" && r.customerPhone ? (
-                            <s-text>Submitted online · {r.customerPhone}</s-text>
+                            <s-text>
+                              {r.calledAt ? "Called \u00b7 " : "Submitted online \u00b7 "}
+                              {r.customerPhone}
+                            </s-text>
                           ) : null}
                           {isAdmin ? (
                             <s-text>Salesperson: {r.salespersonName}</s-text>

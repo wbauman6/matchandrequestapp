@@ -100,7 +100,23 @@ export const loader = async ({ request }) => {
     return cors(Response.json({ linked: false, role: "salesperson", requests: [] }));
   }
 
-  const where = { shop, status: { in: ["active", "pending"] } };
+  // Fulfilled requests used to vanish from POS completely — salespeople want
+  // to still find them ("what did I sell her last time?"), just not mixed into
+  // the working list. They come back here and are reachable via the Fulfilled
+  // filter; recent ones only, so the payload stays small on an iPad.
+  const FULFILLED_WINDOW_DAYS = 90;
+  const fulfilledSince = new Date(Date.now() - FULFILLED_WINDOW_DAYS * 86400000);
+
+  const where = {
+    shop,
+    // Non-item submissions (services, questions, spam) are handled from the
+    // admin page and must never clutter the shop floor.
+    requestKind: "item",
+    OR: [
+      { status: { in: ["active", "pending"] } },
+      { status: "fulfilled", updatedAt: { gte: fulfilledSince } },
+    ],
+  };
   if (salesperson.role !== "admin") {
     where.salespersonEmail = salesperson.email;
   }
@@ -122,6 +138,9 @@ export const loader = async ({ request }) => {
           confidence: true,
           reasoning: true,
           overBudget: true,
+          // Needed for the "Matches to check" filter — without selecting it,
+          // every match looks unread (undefined) and the count is wrong.
+          read: true,
         },
       },
     },
@@ -135,12 +154,17 @@ export const loader = async ({ request }) => {
     customerPhone: r.customerPhone,
     customerEmail: r.customerEmail,
     source: r.source,
+    // Set once a salesperson has actually phoned a website customer, so POS can
+    // stop telling everyone to call someone who has already been called.
+    calledAt: r.calledAt,
     description: r.description,
     matchNotes: r.matchNotes,
     budget: r.budget,
     salespersonName: r.salespersonName,
     status: r.status,
     matchCount: r.matches.length,
+    // Matches nobody has opened yet — drives the "Matches to check" filter.
+    unreadCount: r.matches.filter((m) => !m.read).length,
     matches: r.matches,
   }));
 

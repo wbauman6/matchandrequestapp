@@ -110,6 +110,36 @@ export const action = async ({ request, params }) => {
     return cors(Response.json({ ok: true, request: shaped }));
   }
 
+  // ---- Mark the customer as called (website submissions) ----
+  // Scoped by shop so a request belonging to another store can't be touched.
+  // `source` is deliberately left alone: "came from the website" is permanent
+  // history, "has been called" is current state.
+  if (body._action === "mark-called") {
+    const undo = body.undo === 1 || body.undo === "1" || body.undo === true;
+    // Attribute the call to whoever tapped it, when POS tells us who that is.
+    // Best-effort: a missing staff id must not block recording the call.
+    let calledBy = null;
+    if (!undo) {
+      // POS passes the staff id the same way the list endpoint receives it.
+      // Best-effort: a missing id must not block recording the call.
+      const staffId = String(body.staffMemberId || "").trim();
+      if (staffId) {
+        const sp = await prisma.salesperson
+          .findFirst({ where: { shop, posStaffId: staffId }, select: { name: true } })
+          .catch(() => null);
+        calledBy = sp?.name || null;
+      }
+    }
+    const result = await prisma.request.updateMany({
+      where: { id: params.id, shop },
+      data: undo ? { calledAt: null, calledBy: null } : { calledAt: new Date(), calledBy },
+    });
+    if (result.count === 0) {
+      return cors(Response.json({ error: "Request not found." }, { status: 404 }));
+    }
+    return cors(Response.json({ ok: true, calledAt: undo ? null : new Date().toISOString() }));
+  }
+
   // ---- Status change ----
   const status = String(body.status || "").trim();
   if (!ALLOWED_STATUS.includes(status)) {
