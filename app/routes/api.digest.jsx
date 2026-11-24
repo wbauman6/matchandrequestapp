@@ -24,6 +24,7 @@ import prisma from "../db.server.js";
 import { sendDigestEmail } from "../lib/email.server.js";
 import { isDigestDay, todayName, DIGEST_DAYS } from "../lib/digestConfig.js";
 import { bumpCounter, getCounter, EMAIL_DAILY_LIMIT } from "../lib/aiBudget.server.js";
+import { UNASSIGNED_EMAIL } from "../lib/customerRequestIntake.server.js";
 
 export const loader = async ({ request }) => {
   const secret = process.env.CRON_SECRET;
@@ -64,6 +65,10 @@ export const loader = async ({ request }) => {
   for (const r of requests) {
     const email = (r.salespersonEmail || "").trim().toLowerCase();
     if (!email) continue;
+    // Non-item requests (services, questions, spam) carry a sentinel owner and
+    // must never be emailed to anyone. Guarding here as well as at intake,
+    // because this is the one place a stray value would actually send mail.
+    if (email === UNASSIGNED_EMAIL || !email.includes("@")) continue;
     if (!bySalesperson.has(email)) {
       bySalesperson.set(email, { salespersonName: r.salespersonName, salespersonEmail: email, shop: r.shop, entries: [] });
     }

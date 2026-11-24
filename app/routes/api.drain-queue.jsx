@@ -18,7 +18,7 @@
  */
 import prisma from "../db.server.js";
 import { drainProductQueue } from "../lib/productQueue.server.js";
-import { reapStalledMatches } from "../lib/matchRunner.server.js";
+import { reapStalledMatches, retryBudgetKilledMatches } from "../lib/matchRunner.server.js";
 
 export const loader = async ({ request }) => {
   const secret = process.env.CRON_SECRET;
@@ -32,6 +32,14 @@ export const loader = async ({ request }) => {
   // this catches the ones nobody opens.
   const reaped = await reapStalledMatches().catch((e) => {
     console.error("[drain-queue] stalled-match reap failed:", e?.message || e);
+    return 0;
+  });
+
+  // Requests the AI budget killed yesterday are retryable today — the counter
+  // rolls over daily. Without this they stay in "error" permanently and nobody
+  // finds out until a customer asks why they never heard back.
+  const requeued = await retryBudgetKilledMatches().catch((e) => {
+    console.error("[drain-queue] budget requeue failed:", e?.message || e);
     return 0;
   });
 
@@ -59,6 +67,7 @@ export const loader = async ({ request }) => {
     ok: true,
     timestamp: new Date().toISOString(),
     reaped,
+    requeued,
     forced: force,
     results,
   });

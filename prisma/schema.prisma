@@ -56,6 +56,22 @@ model Request {
   customerId       String?
   priority         Priority @default(normal)
   status           Status   @default(active)
+
+  // --- Request kind + callback tracking ------------------------------------
+  // Not every submission is a request for inventory. Services ("resize my
+  // ring"), buying enquiries ("do you buy pearls?"), questions, price
+  // negotiation and outright spam all arrive through the same form. Running
+  // the AI matcher on them costs real money and returns noise: one question
+  // about personalisation generated 113 matches, a soldering job 55.
+  // Non-item requests are NOT assigned to a salesperson and never matched.
+  // See app/lib/requestKind.js.
+  requestKind      String   @default("item")
+  kindReason       String?
+  // Set when a salesperson has actually phoned a website customer. Distinct
+  // from `source`, which is permanent history: "came from the website" never
+  // changes, "has been called" does.
+  calledAt         DateTime?
+  calledBy         String?
   pinned           Boolean  @default(false)
   lastReminderAt   DateTime?
   // Typed facets derived from keywords at creation (item_type, brand, motif,

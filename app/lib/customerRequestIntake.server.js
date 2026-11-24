@@ -2,6 +2,18 @@ import { waitUntil } from "@vercel/functions";
 import prisma from "../db.server.js";
 import { runMatchesForRequest } from "./matchRunner.server.js";
 import { pickNextSalesperson } from "./rotation.server.js";
+import { classifyRequest, shouldMatch } from "./requestKind.js";
+
+/**
+ * Placeholder owner for requests nobody should be assigned.
+ *
+ * A SENTINEL rather than null because salespersonName/Email are non-null and
+ * every consumer expects a string. UNASSIGNED_EMAIL is deliberately NOT a
+ * valid address — the digest groups by salespersonEmail, and an empty string
+ * would look like a real group and could end up being mailed.
+ */
+export const UNASSIGNED_NAME = "Unassigned";
+export const UNASSIGNED_EMAIL = "unassigned.invalid";
 import {
   verifyFormToken,
   validateSubmission,
@@ -98,17 +110,32 @@ export async function intakeCustomerRequest({ shop, body, ip, admin }) {
     return { status: 429, body: { ok: false, error: capped.message } };
   }
 
-  // 5. Round-robin the lead to a real person. Refuse rather than orphan it.
-  const assignee = await pickNextSalesperson(shop);
-  if (!assignee) {
-    await logRejection(shop, "no_staff", {});
-    return {
-      status: 503,
-      body: {
-        ok: false,
-        error: "We can't take requests online right now. Please call the store and we'll help you.",
-      },
-    };
+  // 5. What KIND of submission is this?
+  //
+  // MUST run before pickNextSalesperson. That call ADVANCES the round-robin,
+  // so classifying afterwards would still burn a salesperson's turn on a
+  // recruitment email or a cold sales pitch — they silently lose their place
+  // in line for a real lead. Both spam submissions already in the live store
+  // did exactly that.
+  const { kind, reason } = classifyRequest(description);
+  const isItem = shouldMatch(kind);
+
+  // 6. Round-robin the lead to a real person — ITEM REQUESTS ONLY. A service
+  // enquiry or a question is handled from the admin page; nobody owns it, and
+  // it must never produce a salesperson alert.
+  let assignee = null;
+  if (isItem) {
+    assignee = await pickNextSalesperson(shop);
+    if (!assignee) {
+      await logRejection(shop, "no_staff", {});
+      return {
+        status: 503,
+        body: {
+          ok: false,
+          error: "We can't take requests online right now. Please call the store and we'll help you.",
+        },
+      };
+    }
   }
 
   const customerId = await findCustomerIdByEmail(admin, customerEmail);
@@ -121,20 +148,35 @@ export async function intakeCustomerRequest({ shop, body, ip, admin }) {
       customerPhone,
       customerId,
       source: "customer",
-      salespersonName: assignee.name,
-      salespersonEmail: assignee.email,
+      requestKind: kind,
+      kindReason: isItem ? null : reason,
+      // Sentinel, not null: these columns are non-null and every consumer
+      // expects a string. UNASSIGNED is deliberately not an address, so a
+      // digest or alert can never accidentally send to it.
+      salespersonName: assignee ? assignee.name : UNASSIGNED_NAME,
+      salespersonEmail: assignee ? assignee.email : UNASSIGNED_EMAIL,
       description,
       keywords: [],
       budget,
       priority: "normal",
       pinned: false,
-      matchState: "pending",
+      // "ok" for non-items: nothing is running and nothing will, so the UI must
+      // not show a "finding matches" spinner for work that will never happen.
+      matchState: isItem ? "pending" : "ok",
     },
   });
 
   console.log(
-    `[customer-request] created ${req.id} (${shop}) → ${assignee.email} [${assignee.tier}]${customerId ? " linked" : " guest"}`,
+    `[customer-request] created ${req.id} (${shop}) → ${assignee ? `${assignee.email} [${assignee.tier}]` : `UNASSIGNED (${kind})`}${customerId ? " linked" : " guest"}`,
   );
+
+  // A non-item submission is never matched. Running the AI on "do you buy
+  // pearls?" or "are you hiring" costs real money and returns noise — one
+  // question about personalisation generated 113 matches before this gate
+  // existed. It waits on the admin page for someone to answer it.
+  if (!isItem) {
+    return { status: 200, body: { ok: true, requestId: req.id, kind } };
+  }
 
   // Identical to the POS path: matching is far too slow to hold a form post
   // open, and Vercel caps the function at 120s. Hand it to waitUntil so the

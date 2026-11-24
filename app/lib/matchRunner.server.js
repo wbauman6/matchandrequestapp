@@ -126,6 +126,39 @@ export async function reapStalledMatches(shop = null) {
   return count;
 }
 
+/**
+ * Requeue requests the AI budget killed, once the counter has rolled over.
+ *
+ * A budget trip is not a failure of the request — it is the circuit breaker
+ * doing its job. But nothing ever retried those requests, so they sat in
+ * "error" forever and the store only found out when a customer asked why they
+ * never heard back. One request sat like that for weeks.
+ *
+ * Only budget errors are retried. A genuine matching failure keeps its error
+ * so it stays visible rather than being silently re-run forever.
+ */
+export async function retryBudgetKilledMatches(shop = null) {
+  const stuck = await prisma.request.findMany({
+    where: {
+      matchState: "error",
+      matchError: { contains: "budget" },
+      status: { in: ["active", "pending", "in_review"] },
+      ...(shop ? { shop } : {}),
+    },
+    select: { id: true, shop: true },
+  });
+  if (stuck.length === 0) return 0;
+
+  // Flip to pending so the normal drain picks them up. Done as one updateMany
+  // rather than per-row so a partial failure can't leave half of them orphaned.
+  const { count } = await prisma.request.updateMany({
+    where: { id: { in: stuck.map((r) => r.id) } },
+    data: { matchState: "pending", matchError: null },
+  });
+  console.warn(`[matchRunner] requeued ${count} request(s) killed by the AI budget`);
+  return count;
+}
+
 // Records the outcome of a matching pass so the UI can distinguish a transient
 // failure ("error", offer Retry) from a genuine empty result ("ok", watching).
 async function setMatchState(requestId, state, error = null) {
