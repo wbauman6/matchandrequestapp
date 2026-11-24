@@ -966,6 +966,12 @@ export const EQUIVALENTS = [
   // ═══════════════════════════════════════════════════════════════════════
   // §3 BRANDS (existing) — REQUEST-ONLY
   // ═══════════════════════════════════════════════════════════════════════
+  // Brands WRITTEN one way but SAID another. Staff type what they say, so the
+  // spoken form must resolve to the written one or retrieval finds nothing.
+  // "silver e newton" embedded as the unrelated words "e" and "newton" and
+  // returned zero results against a catalog that stocks the brand.
+  // REQUEST-ONLY: listings already spell it correctly.
+  { from: /\be[\s-]?newton\b/gi, to: "enewton", scope: "request" },
   { from: /\btiffany\s*(?:&|and)\s*co\b\.?/gi, to: "Tiffany & Co.", scope: "request" },
   { from: /\bt\s*&\s*co\b\.?/gi, to: "Tiffany & Co.", scope: "request" },
   { from: /\btiffany'?s?\b(?!\s*(?:&|and)\s*co)(?!\s*T\b)(?!\s*Hard)/gi, to: "Tiffany & Co.", scope: "request" },

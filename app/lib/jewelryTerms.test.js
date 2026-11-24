@@ -853,6 +853,20 @@ const CORPUS = [
   "statement ring",
 ];
 
+test("brands written one way but SAID another resolve on the request side", () => {
+  // enewton is written as one word and pronounced "e newton". Staff type what
+  // they say, so "silver e newton" previously embedded as the unrelated words
+  // "e" and "newton" and returned nothing from a catalog that stocks the brand.
+  assert.match(req("silver e newton"), /enewton/);
+  assert.match(req("E Newton bracelet"), /enewton/);
+  assert.match(req("e-newton"), /enewton/);
+  // Already correct — must not double-rewrite.
+  assert.equal(req("enewton classic"), "enewton classic");
+  // Listings already spell it correctly; product text must be untouched.
+  assert.equal(prod("enewton classic bracelet"), "enewton classic bracelet");
+  assert.equal(prod("E Newton Design necklace"), "E Newton Design necklace");
+});
+
 test("request normalization is idempotent over the corpus", () => {
   const failures = [];
   for (const s of CORPUS) {
