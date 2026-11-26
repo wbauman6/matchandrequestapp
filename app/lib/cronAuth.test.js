@@ -45,24 +45,34 @@ test("the correct bearer is allowed", () => {
   });
 });
 
-test("Vercel's own cron is allowed either way, so schedules cannot break", () => {
-  // Configuring CRON_SECRET later must not break the existing crons, and not
-  // configuring it must still let them run.
+test("SECURITY: a forged Vercel cron header does NOT get in", () => {
+  // The first version of this guard accepted x-vercel-cron on the assumption
+  // that only Vercel could set it. Verified false against production: curl
+  // with that header returned 200 from the open internet. A header anyone can
+  // send is not authentication.
   for (const secret of [null, "right-secret"]) {
     withSecret(secret, () => {
-      assert.equal(requireCronAuth(req({ "x-vercel-cron": "1" })), null);
-      assert.equal(requireCronAuth(req({ "user-agent": "vercel-cron/1.0" })), null);
+      assert.equal(requireCronAuth(req({ "x-vercel-cron": "1" })).status, 401);
+      assert.equal(requireCronAuth(req({ "user-agent": "vercel-cron/1.0" })).status, 401);
     });
   }
 });
 
+test("with no secret configured, NOTHING gets in — crons included", () => {
+  // Deliberate: a paused drop is visible and recoverable, an open endpoint
+  // that spends money and emails customers is neither.
+  withSecret(null, () => {
+    assert.equal(requireCronAuth(req()).status, 401);
+    assert.equal(requireCronAuth(req({ authorization: "Bearer anything" })).status, 401);
+    assert.equal(requireCronAuth(req({ "x-vercel-cron": "1" })).status, 401);
+  });
+});
+
 test("an empty-string secret is treated as unset, not as a valid password", () => {
   withSecret("", () => {
-    // Nobody can authenticate by sending an empty bearer.
     assert.equal(requireCronAuth(req({ authorization: "Bearer " })).status, 401);
     assert.equal(requireCronAuth(req()).status, 401);
-    // The scheduler still gets through.
-    assert.equal(requireCronAuth(req({ "x-vercel-cron": "1" })), null);
+    assert.equal(requireCronAuth(req({ "x-vercel-cron": "1" })).status, 401);
   });
 });
 

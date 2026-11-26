@@ -2,36 +2,36 @@
  * Authorisation for scheduled (cron) endpoints.
  *
  * These routes are expensive or irreversible — one drains the AI budget,
- * another emails every salesperson — and they sit on a public URL.
+ * another emails every salesperson — and they sit on a guessable public URL.
  *
- * The previous pattern failed OPEN:
+ * Two failures to learn from, both found by testing against the live site
+ * rather than by reading the code:
  *
- *     const secret = process.env.CRON_SECRET;
- *     if (secret) { ...check... }      // no secret configured => no check
+ * 1. The original guard failed OPEN:
  *
- * CRON_SECRET was present in the local .env but never set in the deployment,
- * so in production that `if` was simply skipped and every cron endpoint was
- * callable by anyone. Confirmed against the live site: an unauthenticated
- * GET of /api/drain-queue returned 200 and did work.
+ *        const secret = process.env.CRON_SECRET;
+ *        if (secret) { ...check... }    // no secret configured => no check
  *
- * This fails CLOSED instead. A request is allowed only if it proves it is
- * the scheduler:
+ *    CRON_SECRET is in the local .env, so this looked correct in review, but
+ *    it was never set in the deployment. An unauthenticated GET of
+ *    /api/drain-queue against production returned 200 and did work.
  *
- *   1. a correct `Authorization: Bearer <CRON_SECRET>` — what Vercel sends
- *      automatically once CRON_SECRET is configured; or
- *   2. Vercel's own cron header, which an outside caller cannot set on a
- *      request to this app.
+ * 2. The first fix ALSO accepted Vercel's `x-vercel-cron` header, assuming an
+ *    outside caller could not set it. That assumption was WRONG — Vercel
+ *    passes the header through from inbound requests. Verified against
+ *    production: curl with that header on /api/weekly-drop returned 200 from
+ *    the open internet. A header anyone can send is not authentication.
  *
- * Accepting either means configuring CRON_SECRET later cannot break the
- * existing schedules, and not configuring it still keeps the public out.
+ * So: a shared secret, or nothing. No header fallback, no environment
+ * sniffing, no "looks like the scheduler" heuristics.
+ *
+ * CONSEQUENCE, AND IT IS DELIBERATE: if CRON_SECRET is not set in the
+ * deployment, every scheduled endpoint returns 401 and the crons stop. That
+ * is the correct failure. A paused drop is visible and recoverable; an open
+ * endpoint that spends money and emails real customers is neither.
  */
 
-/** True when this request came from Vercel's cron scheduler. */
-function isVercelCron(request) {
-  if (request.headers.get("x-vercel-cron")) return true;
-  const ua = (request.headers.get("user-agent") || "").toLowerCase();
-  return ua.includes("vercel-cron");
-}
+let warned = false;
 
 /**
  * @returns {Response|null} a 401 to return immediately, or null if allowed.
@@ -39,13 +39,23 @@ function isVercelCron(request) {
 export function requireCronAuth(request) {
   const secret = process.env.CRON_SECRET;
 
-  if (secret) {
-    const token = (request.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
-    if (token === secret) return null;
+  if (!secret) {
+    // Logged once per instance — enough to diagnose, not enough to flood.
+    if (!warned) {
+      warned = true;
+      console.error(
+        "[cron-auth] CRON_SECRET is not set. Every scheduled endpoint will " +
+          "return 401 until it is configured in the deployment environment. " +
+          "This is intentional: without it these endpoints would be callable " +
+          "by anyone.",
+      );
+    }
+    return new Response("Unauthorized", { status: 401 });
   }
 
-  if (isVercelCron(request)) return null;
+  const header = request.headers.get("authorization") || "";
+  const token = header.replace(/^Bearer\s+/i, "").trim();
+  if (token && token === secret) return null;
 
-  // Deliberately terse: never hint at whether a secret is configured.
   return new Response("Unauthorized", { status: 401 });
 }
