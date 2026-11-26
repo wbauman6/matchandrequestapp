@@ -20,6 +20,7 @@
  *
  * Protected by CRON_SECRET (Vercel sends Authorization: Bearer <CRON_SECRET>).
  */
+import { requireCronAuth } from "../lib/cronAuth.js";
 import prisma from "../db.server.js";
 import { sendDigestEmail } from "../lib/email.server.js";
 import { isDigestDay, todayName, DIGEST_DAYS } from "../lib/digestConfig.js";
@@ -27,11 +28,11 @@ import { bumpCounter, getCounter, EMAIL_DAILY_LIMIT } from "../lib/aiBudget.serv
 import { UNASSIGNED_EMAIL } from "../lib/customerRequestIntake.server.js";
 
 export const loader = async ({ request }) => {
-  const secret = process.env.CRON_SECRET;
-  if (secret) {
-    const token = (request.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
-    if (token !== secret) return new Response("Unauthorized", { status: 401 });
-  }
+  // Fails CLOSED — see app/lib/cronAuth.js. CRON_SECRET was never set in the
+  // deployment, and the old inline check skipped itself when it was absent,
+  // leaving this endpoint open to anyone.
+  const denied = requireCronAuth(request);
+  if (denied) return denied;
 
   const url = new URL(request.url);
   const force = url.searchParams.get("force") === "1";

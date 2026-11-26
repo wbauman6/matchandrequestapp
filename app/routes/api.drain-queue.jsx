@@ -16,17 +16,18 @@
  *
  * Protected by CRON_SECRET (Vercel sends Authorization: Bearer <CRON_SECRET>).
  */
+import { requireCronAuth } from "../lib/cronAuth.js";
 import prisma from "../db.server.js";
 import { drainProductQueue, prewarmEmbeddings } from "../lib/productQueue.server.js";
 import { reapStalledMatches, retryBudgetKilledMatches } from "../lib/matchRunner.server.js";
 import { isDropWindow } from "../lib/dropSchedule.js";
 
 export const loader = async ({ request }) => {
-  const secret = process.env.CRON_SECRET;
-  if (secret) {
-    const token = (request.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
-    if (token !== secret) return new Response("Unauthorized", { status: 401 });
-  }
+  // Fails CLOSED — see app/lib/cronAuth.js. CRON_SECRET was never set in the
+  // deployment, and the old inline check skipped itself when it was absent,
+  // leaving this endpoint open to anyone.
+  const denied = requireCronAuth(request);
+  if (denied) return denied;
 
   // Backstop for matching runs killed mid-flight (function timeout, deploy,
   // crashed worker). The loaders self-heal a request when someone opens it;

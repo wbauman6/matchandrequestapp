@@ -10,16 +10,17 @@
  * Outside the drop window it's a no-op (?force=1 overrides, for testing).
  * Protected by CRON_SECRET.
  */
+import { requireCronAuth } from "../lib/cronAuth.js";
 import prisma from "../db.server.js";
 import { runWeeklyDrop } from "../lib/dropRun.server.js";
 import { isDropWindow } from "../lib/dropSchedule.js";
 
 export const loader = async ({ request }) => {
-  const secret = process.env.CRON_SECRET;
-  if (secret) {
-    const token = (request.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
-    if (token !== secret) return new Response("Unauthorized", { status: 401 });
-  }
+  // Fails CLOSED — see app/lib/cronAuth.js. CRON_SECRET was never set in the
+  // deployment, and the old inline check skipped itself when it was absent,
+  // leaving this endpoint open to anyone.
+  const denied = requireCronAuth(request);
+  if (denied) return denied;
   const url = new URL(request.url);
   const force = url.searchParams.get("force") === "1";
   const trigger = url.searchParams.get("trigger") || "cron";
