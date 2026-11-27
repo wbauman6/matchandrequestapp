@@ -2,15 +2,30 @@ import prisma from "../db.server.js";
 
 /**
  * Daily cost kill switch. Every Anthropic API attempt increments a per-day
- * counter; once the cap is hit, matching hard-stops (throws) instead of
- * spending. A runaway fan-out (bulk product sync, webhook retry storm) is
- * capped at the limit no matter what upstream does.
+ * counter. A runaway fan-out (bulk product sync, webhook retry storm) is
+ * capped no matter what upstream does.
  *
- * Limits (editable via env):
- *   ANTHROPIC_DAILY_CALL_LIMIT — max Anthropic API calls per UTC day (default 500).
- *   MATCH_EMAIL_DAILY_LIMIT    — max match-alert emails per UTC day (default 50).
+ * Two tiers — see trackAiCall:
+ *   AI_DAILY_CALL_LIMIT  stops ROUTINE work.
+ *   AI_DAILY_HARD_LIMIT  stops EVERYTHING, including an in-flight drop.
+ *
+ * The soft default is 1500, not 500. 500 was set before anyone had measured a
+ * real drop: a full pass over this catalogue runs ~75 AI calls per 100
+ * products, so ~3,400 calls for ~4,500 queued items. At 500 the drop died
+ * roughly a seventh of the way through every week, which is how a request sat
+ * in matchState=error at 511/500 for weeks. A default that cannot complete one
+ * normal run is not a safety limit, it is a bug.
+ *
+ * Deliberately a code default rather than an env var: the deployment has no
+ * override set, so anything left to the environment silently reverts to the
+ * broken value.
+ *
+ * Env overrides:
+ *   ANTHROPIC_DAILY_CALL_LIMIT — soft cap (default 1500)
+ *   ANTHROPIC_DAILY_HARD_LIMIT — hard ceiling (default 4x the soft cap)
+ *   MATCH_EMAIL_DAILY_LIMIT    — max match-alert emails per UTC day (default 50)
  */
-export const AI_DAILY_CALL_LIMIT = parseInt(process.env.ANTHROPIC_DAILY_CALL_LIMIT || "500", 10);
+export const AI_DAILY_CALL_LIMIT = parseInt(process.env.ANTHROPIC_DAILY_CALL_LIMIT || "1500", 10);
 export const EMAIL_DAILY_LIMIT = parseInt(process.env.MATCH_EMAIL_DAILY_LIMIT || "50", 10);
 
 /**

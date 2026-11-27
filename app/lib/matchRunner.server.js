@@ -1,3 +1,4 @@
+import { shouldMatch } from "./requestKind.js";
 import prisma from "../db.server.js";
 import {
   embedText,
@@ -71,6 +72,15 @@ function upsertMatch(shop, request, p, fields) {
  * announced only by the scheduled digest (/api/digest).
  */
 export async function runMatchesForRequest(_admin, request) {
+  // Last line of defence. Intake already refuses to match non-item requests,
+  // but this function is also reachable from the admin and POS save paths, and
+  // an edit must not quietly start spending AI on a service enquiry or spam.
+  // Cheaper to check here than to trust every caller.
+  if (!shouldMatch(request.requestKind || "item")) {
+    await setMatchState(request.id, "ok", null).catch(() => {});
+    return 0;
+  }
+
   const reqVec = await getRequestEmbedding(request);
   if (!reqVec) {
     // No query embedding. If we HAVE a key, this is a failure (embedding service
@@ -143,6 +153,10 @@ export async function retryBudgetKilledMatches(shop = null) {
       matchState: "error",
       matchError: { contains: "budget" },
       status: { in: ["active", "pending", "in_review"] },
+      // Only item requests. Re-queueing a service enquiry or spam would spend
+      // the new day's budget on the same guaranteed non-answer that burned
+      // yesterday's.
+      requestKind: "item",
       ...(shop ? { shop } : {}),
     },
     select: { id: true, shop: true },

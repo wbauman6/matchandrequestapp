@@ -385,8 +385,25 @@ export async function drainProductQueue(shop, { force = false, critical = false 
 
       // 2) Cheap gates in bulk: existing matches + already-reasoned pairs.
       const productIds = items.map((i) => i.product.id);
+      // ONLY item requests. A service job, a buying enquiry, a price question
+      // or spam has nothing in the catalogue to match, so every pair sent to
+      // the AI for one is money spent on a guaranteed non-answer.
+      //
+      // Intake already refuses to match these, but that only covers new
+      // submissions: the drain re-evaluates EVERY open request against every
+      // queued product, so without this filter the junk gets re-judged against
+      // the whole catalogue on every single drop. Measured on the live store:
+      // 4 non-item requests x ~4,500 queued products, being re-sent to the AI
+      // week after week.
+      //
+      // "vague" is excluded for the same reason — it is a real customer, but
+      // there is nothing searchable in the text until someone calls them.
       const requests = await prisma.request.findMany({
-        where: { shop, status: { in: ["active", "pending", "in_review"] } },
+        where: {
+          shop,
+          status: { in: ["active", "pending", "in_review"] },
+          requestKind: "item",
+        },
       });
       const existing = await prisma.match.findMany({
         where: { shop, productId: { in: productIds } },
