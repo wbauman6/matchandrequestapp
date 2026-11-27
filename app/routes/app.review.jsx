@@ -41,7 +41,7 @@ export const action = async ({ request }) => {
   if (act === "dismiss") {
     await prisma.match.update({
       where: { id },
-      data: { declined: true, needsReview: false },
+      data: { declined: true, needsReview: false, declinedAt: new Date() },
     });
   }
 

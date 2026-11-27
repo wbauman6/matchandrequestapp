@@ -72,6 +72,12 @@ model Request {
   // changes, "has been called" does.
   calledAt         DateTime?
   calledBy         String?
+  // What happened on the last call: "spoke" | "message" | "later". calledAt
+  // alone could not tell a conversation from a voicemail.
+  callOutcome      String?
+  // When to try the customer again. Due/overdue follow-ups go to the top of
+  // the salesperson's list; future ones wait out of the way.
+  followUpAt       DateTime?
   pinned           Boolean  @default(false)
   lastReminderAt   DateTime?
   // Typed facets derived from keywords at creation (item_type, brand, motif,
@@ -96,6 +102,7 @@ model Request {
   updatedAt        DateTime @updatedAt
   matches          Match[]
   notes            Note[]
+  estateSuggestions EstateSuggestion[]
 
   @@index([shop])
   @@index([shop, itemType])
@@ -123,6 +130,12 @@ model Match {
   // A match is emailed AT MOST once, ever (fixes the duplicate-email storm).
   notifiedAt      DateTime?
   confirmedAt     DateTime?
+  // The salesperson's decision. keptAt = "I want to show this piece";
+  // declined (+ declinedAt/declineReason) = "not a fit". When EVERY match on a
+  // non-designer request is declined, the request appears for the appraiser.
+  keptAt          DateTime?
+  declinedAt      DateTime?
+  declineReason   String?
   createdAt       DateTime @default(now())
   request         Request  @relation(fields: [requestId], references: [id], onDelete: Cascade)
 
@@ -336,4 +349,25 @@ model Session {
   emailVerified Boolean?  @default(false)
   refreshToken        String?
   refreshTokenExpires DateTime?
+}
+
+// An estate piece the appraiser spotted for a specific request, BEFORE it is
+// appraised. The salesperson approves or declines; only an approval makes it
+// appraisal work. status: suggested | approved | declined | appraised
+model EstateSuggestion {
+  id        String    @id @default(cuid())
+  shop      String
+  requestId String
+  // Where sales can find the piece: "Estate tray B, envelope 14".
+  location  String
+  note      String?
+  status    String    @default("suggested")
+  decidedBy String?
+  decidedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  request   Request   @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  @@index([shop, status])
+  @@index([requestId])
 }

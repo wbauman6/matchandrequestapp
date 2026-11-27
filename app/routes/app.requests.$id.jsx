@@ -21,6 +21,11 @@ export const loader = async ({ request, params }) => {
         notes: {
           orderBy: { createdAt: "asc" },
         },
+        // Estate pieces the appraiser has put forward for this request.
+        estateSuggestions: {
+          where: { status: { in: ["suggested", "approved"] } },
+          orderBy: { createdAt: "asc" },
+        },
       },
     });
 
@@ -109,8 +114,26 @@ export const action = async ({ request, params }) => {
   if (act === "decline-all") {
     await prisma.match.updateMany({
       where: { requestId: params.id, shop: session.shop, declined: false },
-      data: { declined: true, read: true },
+      data: { declined: true, read: true, keptAt: null, declinedAt: new Date() },
     });
+  }
+
+  // Yes / no on an estate piece the appraiser put forward — the same decision
+  // a salesperson makes on the iPad, for when they are at a desk instead.
+  // Only a yes makes it appraisal work.
+  if (act === "estate-decide") {
+    const decision = String(data.get("decision") || "");
+    if (decision === "approved" || decision === "declined") {
+      await prisma.estateSuggestion.updateMany({
+        where: {
+          id: String(data.get("suggestionId") || ""),
+          requestId: params.id,
+          shop: session.shop,
+          status: "suggested",
+        },
+        data: { status: decision, decidedAt: new Date(), decidedBy: "Office" },
+      });
+    }
   }
 
   if (act === "add-note") {
@@ -634,7 +657,7 @@ export default function RequestDetailPage() {
                   cursor: "pointer",
                 }}
               >
-                Mark fulfilled
+                Mark sold
               </button>
             </Form>
           )}
@@ -680,6 +703,80 @@ export default function RequestDetailPage() {
           )}
         </div>
       </s-section>
+
+      {(req.estateSuggestions || []).length > 0 && (
+        <s-section heading="Estate pieces from the appraiser">
+          <p style={{ color: "#6d7175", marginTop: 0, fontSize: 13 }}>
+            The appraiser spotted these in the estate backlog. They have not been appraised.
+            Have a look and say whether it is worth appraising for this customer.
+          </p>
+          <div style={{ display: "grid", gap: 10 }}>
+            {req.estateSuggestions.map((e) => (
+              <div
+                key={e.id}
+                style={{
+                  display: "flex",
+                  gap: 12,
+                  alignItems: "center",
+                  flexWrap: "wrap",
+                  border: "1px solid #e1e3e5",
+                  borderRadius: 8,
+                  padding: 12,
+                  background: e.status === "approved" ? "#f3faf5" : "#fff",
+                }}
+              >
+                <div style={{ flex: 1, minWidth: 240 }}>
+                  <div style={{ fontWeight: 600 }}>{e.location}</div>
+                  {e.note && <div style={{ fontSize: 13, color: "#6d7175" }}>{e.note}</div>}
+                </div>
+                {e.status === "approved" ? (
+                  <span style={{ fontSize: 13, color: "#1a7a4a", fontWeight: 600 }}>
+                    Approved — being appraised
+                  </span>
+                ) : (
+                  <Form method="post" style={{ display: "flex", gap: 8 }}>
+                    <input type="hidden" name="_action" value="estate-decide" />
+                    <input type="hidden" name="suggestionId" value={e.id} />
+                    <button
+                      type="submit"
+                      name="decision"
+                      value="approved"
+                      style={{
+                        background: "#008060",
+                        color: "#fff",
+                        border: "none",
+                        borderRadius: 6,
+                        padding: "8px 16px",
+                        fontSize: 13,
+                        fontWeight: 600,
+                        cursor: "pointer",
+                      }}
+                    >
+                      Yes, please appraise
+                    </button>
+                    <button
+                      type="submit"
+                      name="decision"
+                      value="declined"
+                      style={{
+                        background: "#fff",
+                        border: "1px solid #c9cccf",
+                        borderRadius: 6,
+                        padding: "8px 16px",
+                        fontSize: 13,
+                        cursor: "pointer",
+                        color: "#414547",
+                      }}
+                    >
+                      Not a fit
+                    </button>
+                  </Form>
+                )}
+              </div>
+            ))}
+          </div>
+        </s-section>
+      )}
 
       <RefineMatching req={req} />
 

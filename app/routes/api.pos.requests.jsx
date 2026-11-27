@@ -2,6 +2,7 @@ import { waitUntil } from "@vercel/functions";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { runMatchesForRequest } from "../lib/matchRunner.server";
+import { workState } from "../lib/requestWork.js";
 
 // Create-request endpoint for the POS UI extension. Reuses the exact same create
 // + matching path as the admin web app (app._index.jsx): create the Request row,
@@ -109,9 +110,11 @@ export const loader = async ({ request }) => {
 
   const where = {
     shop,
-    // Non-item submissions (services, questions, spam) are handled from the
-    // admin page and must never clutter the shop floor.
-    requestKind: "item",
+    // Services, questions and spam are handled from the admin page and must
+    // never clutter the shop floor. VAGUE leads are different: they keep their
+    // salesperson and need a phone call, but this list used to load "item"
+    // only — so a salesperson was assigned a callback they could not see.
+    requestKind: { in: ["item", "vague"] },
     OR: [
       { status: { in: ["active", "pending"] } },
       { status: "fulfilled", updatedAt: { gte: fulfilledSince } },
@@ -141,13 +144,41 @@ export const loader = async ({ request }) => {
           // Needed for the "Matches to check" filter — without selecting it,
           // every match looks unread (undefined) and the count is wrong.
           read: true,
+          // "Keep to show" — the salesperson's yes. Drives the next action.
+          keptAt: true,
         },
       },
+      // Estate pieces the appraiser has put forward for this request.
+      estateSuggestions: {
+        where: { status: { in: ["suggested", "approved"] } },
+        select: { id: true, status: true, location: true, note: true, createdAt: true },
+        orderBy: { createdAt: "asc" },
+      },
+      // Every match ever found, declined included. Live vs total is what tells
+      // "never found anything" from "all suggestions turned down".
+      _count: { select: { matches: true } },
     },
   });
 
-  const shaped = requests.map((r) => ({
+  const now = new Date();
+
+  const shaped = requests.map((r) => {
+    const work = workState(r, now);
+    return {
     id: r.id,
+    createdAt: r.createdAt,
+    requestKind: r.requestKind || "item",
+    callOutcome: r.callOutcome,
+    followUpAt: r.followUpAt,
+    // The single thing to do next, worked out on the server so POS, admin and
+    // the appraiser page can never disagree. { key, group, rank, label }
+    nextAction: work.nextAction,
+    keptCount: work.keptMatches,
+    declinedCount: work.declinedMatches,
+    // True when declining the LAST live match would hand this request to the
+    // appraiser — POS warns before that tap rather than after.
+    appraiserOnLastDecline: work.nonDesigner && (r.requestKind || "item") === "item",
+    estateSuggestions: r.estateSuggestions,
     customerName: r.customerName,
     // Storefront submissions carry a phone number the salesperson is expected
     // to call — surfaced with the "customer submitted" flag on POS.
@@ -166,7 +197,8 @@ export const loader = async ({ request }) => {
     // Matches nobody has opened yet — drives the "Matches to check" filter.
     unreadCount: r.matches.filter((m) => !m.read).length,
     matches: r.matches,
-  }));
+    };
+  });
 
   return cors(Response.json({ linked: true, role: salesperson.role, requests: shaped }));
 };

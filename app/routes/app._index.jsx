@@ -6,13 +6,33 @@ import prisma from "../db.server";
 import { runMatchesForRequest } from "../lib/matchRunner.server";
 import { intakeStatsToday } from "../lib/customerRequest.server";
 import { KIND_LABEL } from "../lib/requestKind.js";
+import { WORK_INCLUDE, workState } from "../lib/requestWork.js";
+import { matchesSearch } from "../lib/nextAction.js";
+
+// Next-action keys that mean "a salesperson needs to pick up the phone".
+const CALL_KEYS = ["followUp", "call", "callDetails", "needsRewrite"];
+const REVIEW_KEYS = ["estate", "newMatches", "show", "decide"];
+const APPRAISER_KEYS = ["appraiser", "appraising"];
+
+// Which single list a request belongs on. Every open request lands in exactly
+// one of these, so the chip counts add up to "All" and nothing is stranded.
+// (The old chips overlapped: "From website" is where a request came from, not
+// something to do, and "Nothing found yet" included requests that were never
+// searched at all.)
+function bucketOf(na) {
+  if (na.group === "office") return "office";
+  if (CALL_KEYS.includes(na.key)) return "callbacks";
+  if (REVIEW_KEYS.includes(na.key)) return "review";
+  if (APPRAISER_KEYS.includes(na.key)) return "appraiser";
+  return "waiting";
+}
 
 export const loader = async ({ request }) => {
   const { session } = await authenticate.admin(request);
-  const [requests, salespeople, intake] = await Promise.all([
+  const [rawRequests, salespeople, intake] = await Promise.all([
     prisma.request.findMany({
       where: { shop: session.shop, status: { in: ["active", "pending"] } },
-      include: { _count: { select: { matches: { where: { declined: false } } } } },
+      include: WORK_INCLUDE,
       orderBy: [{ pinned: "desc" }, { createdAt: "desc" }],
     }),
     prisma.salesperson.findMany({
@@ -25,20 +45,25 @@ export const loader = async ({ request }) => {
     intakeStatsToday().catch(() => null),
   ]);
   const hasAnthropicKey = Boolean(process.env.ANTHROPIC_API_KEY);
-  // Counts drive the filter chips. Computed here rather than in the component
-  // so an empty category can hide its chip instead of showing "(0)".
+  // The next step for every request, worked out by the same code POS and the
+  // appraiser page use. The embedding is dropped: it is a large vector the
+  // browser has no use for.
+  const now = new Date();
+  const requests = rawRequests.map((r) => {
+    const work = workState(r, now);
+    // eslint-disable-next-line no-unused-vars
+    const { embedding, matches, estateSuggestions, _count, ...rest } = r;
+    return { ...rest, work: { ...work, bucket: bucketOf(work.nextAction) } };
+  });
+  const inBucket = (b) => requests.filter((r) => r.work.bucket === b).length;
   const counts = {
     all: requests.length,
-    nonItem: requests.filter((r) => {
-      const k = r.requestKind || "item";
-      return k !== "item" && k !== "vague";
-    }).length,
-    // Real leads from real customers that are too vague to search on. Kept
-    // separate from spam/services: these need a phone call, not filing.
-    needsDetail: requests.filter((r) => (r.requestKind || "item") === "vague").length,
-    website: requests.filter((r) => r.source === "customer").length,
-    needsCall: requests.filter((r) => r.source === "customer" && !r.calledAt).length,
-    noMatches: requests.filter((r) => r._count.matches === 0 && r.matchState === "ok").length,
+    callbacks: inBucket("callbacks"),
+    review: inBucket("review"),
+    waiting: inBucket("waiting"),
+    appraiser: inBucket("appraiser"),
+    office: inBucket("office"),
+    // Not a bucket — a search that failed can sit in any of them.
     problems: requests.filter((r) => r.matchState === "error").length,
   };
   return { requests, salespeople, hasAnthropicKey, intake, counts };
@@ -94,8 +119,14 @@ export const action = async ({ request }) => {
     await prisma.request.updateMany({
       where: { id, shop },
       data: undo
-        ? { calledAt: null, calledBy: null }
-        : { calledAt: new Date(), calledBy: String(data.get("by") || "").slice(0, 80) || null },
+        ? { calledAt: null, calledBy: null, callOutcome: null }
+        : {
+            calledAt: new Date(),
+            calledBy: String(data.get("by") || "").slice(0, 80) || null,
+            callOutcome: "spoke",
+            // They have been reached, so any "call again" reminder is done.
+            followUpAt: null,
+          },
     });
     return null;
   }
@@ -131,80 +162,92 @@ export const action = async ({ request }) => {
   return null;
 };
 
+const clip = (text, n) => {
+  const t = String(text || "").trim();
+  return t.length > n ? `${t.slice(0, n - 1).trimEnd()}\u2026` : t;
+};
+
+const tag = {
+  display: "inline-block",
+  marginRight: 6,
+  marginTop: 4,
+  fontSize: 10,
+  fontWeight: 700,
+  textTransform: "uppercase",
+  letterSpacing: "0.5px",
+  padding: "2px 8px",
+  borderRadius: 10,
+  background: "#eef0f2",
+  color: "#5c5f62",
+};
+
+// One colour per kind of next step: amber = pick up the phone, green = a piece
+// to decide on, grey = nothing for anyone to do right now.
+function stepStyle(na) {
+  if (CALL_KEYS.includes(na.key)) return { background: "#fff5ea", color: "#a85100" };
+  if (na.group === "do") return { background: "#e3f1df", color: "#1a7a4a" };
+  if (na.key === "problem") return { background: "#fdecea", color: "#b42318" };
+  return { background: "#eef0f2", color: "#5c5f62" };
+}
+
 function RequestRow({ r, salespeople = [] }) {
+  const na = r.work.nextAction;
+  const live = r.work.liveMatches;
+  const kind = r.requestKind || "item";
+  const owned = kind === "item" || kind === "vague";
+  const needsCall = CALL_KEYS.includes(na.key) || (r.source === "customer" && !r.calledAt);
   return (
-    <tr style={{ borderBottom: "1px solid #e1e3e5" }}>
-      <td style={{ padding: "12px 16px" }}>
+    <tr style={{ borderBottom: "1px solid #e1e3e5", verticalAlign: "top" }}>
+      {/* What they want leads the row. It is what staff remember a request by,
+          and it used not to be on this table at all. */}
+      <td style={{ padding: "12px 16px", maxWidth: 380 }}>
         <div style={{ fontWeight: 600 }}>
           {r.pinned && <span title="Pinned" style={{ marginRight: 4 }}>📌</span>}
-          <Link
-            to={`/app/requests/${r.id}`}
-            style={{ color: "#005bd3", textDecoration: "none" }}
-          >
-            {r.customerName}
+          <Link to={`/app/requests/${r.id}`} style={{ color: "#005bd3", textDecoration: "none" }}>
+            {clip(r.description || "(no description)", 120)}
           </Link>
-          {/* Submitted by the shopper on the storefront. "Call customer" used
-              to show forever, so nothing distinguished "needs calling" from
-              "already called" — three people could ring the same customer, or
-              nobody would, each assuming someone had. */}
+        </div>
+        <div>
+          {/* Where it came from is a label, not a task. */}
           {r.source === "customer" && (
-            <span
-              title={
-                r.calledAt
-                  ? `Called${r.calledBy ? ` by ${r.calledBy}` : ""} on ${new Date(r.calledAt).toLocaleString()}`
-                  : "Submitted by the customer on the storefront — call them"
-              }
-              style={{
-                marginLeft: 6,
-                fontSize: 10,
-                fontWeight: 700,
-                textTransform: "uppercase",
-                letterSpacing: "0.5px",
-                padding: "2px 8px",
-                borderRadius: 10,
-                background: r.calledAt ? "#e3f1df" : "#fff5ea",
-                color: r.calledAt ? "#1a7a4a" : "#a85100",
-              }}
-            >
-              {r.calledAt ? "Called" : "Call customer"}
+            <span style={tag} title="Submitted by the customer on the website form">
+              Website
             </span>
           )}
           {/* Not a request for inventory — a service, question, buying enquiry
               or spam. Nobody owns it and it was never matched. */}
-          {(r.requestKind || "item") !== "item" && (
+          {kind !== "item" && (
             <span
-              title={`Not an item request (${r.requestKind}) — no salesperson assigned, not matched`}
-              style={{
-                marginLeft: 6,
-                fontSize: 10,
-                fontWeight: 700,
-                textTransform: "uppercase",
-                letterSpacing: "0.5px",
-                padding: "2px 8px",
-                borderRadius: 10,
-                background: "#eef0f2",
-                color: "#5c5f62",
-              }}
+              style={tag}
+              title={
+                kind === "vague"
+                  ? "Too general to search — the salesperson calls, then rewrites the request"
+                  : `Not an item request (${kind}) — no salesperson assigned, not matched`
+              }
             >
-              {KIND_LABEL[r.requestKind] || r.requestKind}
+              {KIND_LABEL[kind] || kind}
             </span>
           )}
         </div>
+      </td>
+      <td style={{ padding: "12px 16px" }}>
+        <div style={{ fontWeight: 600 }}>{r.customerName}</div>
         {r.customerPhone && (
-          <div style={{ fontSize: 12, color: r.source === "customer" ? "#a85100" : "#6d7175" }}>
-            {r.customerPhone}
-          </div>
+          <div style={{ fontSize: 12, color: needsCall ? "#a85100" : "#6d7175" }}>{r.customerPhone}</div>
         )}
         {r.customerEmail && (
           <div style={{ fontSize: 12, color: "#6d7175" }}>{r.customerEmail}</div>
+        )}
+        {r.budget != null && (
+          <div style={{ fontSize: 12, color: "#6d7175" }}>Budget ${r.budget.toLocaleString()}</div>
         )}
       </td>
       <td style={{ padding: "12px 16px", color: "#6d7175", fontSize: 13 }}>
         {/* Reassignable in place. Rotation is blind to who is actually in
             today or who already knows the customer, so a manager needs to move
-            one without re-entering it. Non-item requests are deliberately NOT
+            one without re-entering it. Office enquiries are deliberately NOT
             reassignable — nobody owns a service enquiry or spam. */}
-        {salespeople.length > 0 && (r.requestKind || "item") === "item" ? (
+        {salespeople.length > 0 && owned ? (
           <Form method="post">
             <input type="hidden" name="_action" value="reassign" />
             <input type="hidden" name="id" value={r.id} />
@@ -239,92 +282,141 @@ function RequestRow({ r, salespeople = [] }) {
               ))}
             </select>
           </Form>
-        ) : (
+        ) : owned ? (
           r.salespersonName
-        )}
-      </td>
-      <td style={{ padding: "12px 16px", fontSize: 13, color: "#212326" }}>
-        {r.budget != null ? `$${r.budget.toLocaleString()}` : <span style={{ color: "#c9cccf" }}>—</span>}
-      </td>
-      <td style={{ padding: "12px 16px", textAlign: "center" }}>
-        {r._count.matches > 0 ? (
-          <Link
-            to={`/app/requests/${r.id}`}
-            style={{
-              background: "#e3f1df",
-              color: "#1a7a4a",
-              fontWeight: 700,
-              fontSize: 12,
-              padding: "2px 10px",
-              borderRadius: 12,
-              textDecoration: "none",
-            }}
-          >
-            {r._count.matches}
-          </Link>
         ) : (
-          <span style={{ color: "#c9cccf" }}>—</span>
+          <span style={{ color: "#8c9196" }}>Office</span>
         )}
       </td>
+      {/* The one next step, and whose turn it is. */}
       <td style={{ padding: "12px 16px" }}>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          {/* Only website requests need a callback — a counter request was
-              taken with the customer standing there. */}
-          {r.source === "customer" && (
+        <span
+          style={{
+            display: "inline-block",
+            fontSize: 12,
+            fontWeight: 600,
+            padding: "3px 10px",
+            borderRadius: 12,
+            ...stepStyle(na),
+          }}
+        >
+          {na.label}
+        </span>
+        {r.calledAt && r.source === "customer" && (
+          <div style={{ fontSize: 11, color: "#6d7175", marginTop: 4 }}>
+            Spoke to customer{r.calledBy ? ` (${r.calledBy})` : ""}
+          </div>
+        )}
+        {live > 0 && (
+          <div style={{ fontSize: 12, marginTop: 4 }}>
+            <Link to={`/app/requests/${r.id}`} style={{ color: "#005bd3", textDecoration: "none" }}>
+              {live} piece{live === 1 ? "" : "s"} to consider
+              {r.work.keptMatches > 0 ? ` · ${r.work.keptMatches} kept` : ""}
+            </Link>
+          </div>
+        )}
+      </td>
+      <td style={{ padding: "12px 16px", whiteSpace: "nowrap" }}>
+        <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+          {/* Only the action this row actually needs is a button. Everything
+              occasional lives under More, so a mis-click on Delete is not
+              sitting next to the thing done ten times a day. */}
+          {(r.source === "customer" || kind === "vague") && (
             <Form method="post">
               <input type="hidden" name="_action" value="mark-called" />
               <input type="hidden" name="id" value={r.id} />
               {r.calledAt && <input type="hidden" name="undo" value="1" />}
               <button
                 type="submit"
-                style={{ ...actionBtn, color: r.calledAt ? "#6d7175" : "#a85100", fontWeight: r.calledAt ? 400 : 600 }}
-                title={r.calledAt ? "Undo — mark as not called" : "Mark that you phoned this customer"}
+                style={{
+                  ...actionBtn,
+                  border: "1px solid #c9cccf",
+                  padding: "4px 10px",
+                  color: r.calledAt ? "#6d7175" : "#a85100",
+                  fontWeight: r.calledAt ? 400 : 600,
+                }}
+                title={r.calledAt ? "Undo — nobody has spoken to them yet" : "Record that someone spoke to this customer"}
               >
-                {r.calledAt ? "Undo called" : "Mark called"}
+                {r.calledAt ? "Undo called" : "Spoke to customer"}
               </button>
             </Form>
           )}
-          <Form method="post">
-            <input type="hidden" name="_action" value="pin" />
-            <input type="hidden" name="id" value={r.id} />
-            <button type="submit" style={actionBtn}>
-              {r.pinned ? "Unpin" : "Pin"}
-            </button>
-          </Form>
-          <Form method="post">
-            <input type="hidden" name="_action" value="status" />
-            <input type="hidden" name="id" value={r.id} />
-            <input type="hidden" name="status" value="fulfilled" />
-            <button type="submit" style={{ ...actionBtn, color: "#1a7a4a" }}>
-              Fulfill
-            </button>
-          </Form>
-          <Form method="post">
-            <input type="hidden" name="_action" value="status" />
-            <input type="hidden" name="id" value={r.id} />
-            <input type="hidden" name="status" value="archived" />
-            <button type="submit" style={actionBtn}>
-              Archive
-            </button>
-          </Form>
-          <Form method="post">
-            <input type="hidden" name="_action" value="delete" />
-            <input type="hidden" name="id" value={r.id} />
-            <button
-              type="submit"
-              style={{ ...actionBtn, color: "#d72c0d" }}
-              onClick={(e) => {
-                if (!confirm("Delete this request and all its matches?")) e.preventDefault();
+          <details style={{ position: "relative" }}>
+            <summary style={{ ...actionBtn, border: "1px solid #c9cccf", padding: "4px 10px", listStyle: "none", cursor: "pointer" }}>
+              More ▾
+            </summary>
+            <div
+              style={{
+                position: "absolute",
+                right: 0,
+                zIndex: 5,
+                marginTop: 4,
+                background: "#fff",
+                border: "1px solid #c9cccf",
+                borderRadius: 8,
+                boxShadow: "0 4px 12px rgba(0,0,0,0.12)",
+                padding: 6,
+                display: "grid",
+                gap: 2,
+                minWidth: 150,
               }}
             >
-              Delete
-            </button>
-          </Form>
+              <Form method="post">
+                <input type="hidden" name="_action" value="pin" />
+                <input type="hidden" name="id" value={r.id} />
+                <button type="submit" style={menuBtn}>
+                  {r.pinned ? "Unpin" : "Pin to top"}
+                </button>
+              </Form>
+              <Form method="post">
+                <input type="hidden" name="_action" value="status" />
+                <input type="hidden" name="id" value={r.id} />
+                <input type="hidden" name="status" value="fulfilled" />
+                <button type="submit" style={{ ...menuBtn, color: "#1a7a4a" }}>
+                  Mark sold
+                </button>
+              </Form>
+              <Form method="post">
+                <input type="hidden" name="_action" value="status" />
+                <input type="hidden" name="id" value={r.id} />
+                <input type="hidden" name="status" value="archived" />
+                <button type="submit" style={menuBtn}>
+                  Archive
+                </button>
+              </Form>
+              <Form method="post">
+                <input type="hidden" name="_action" value="delete" />
+                <input type="hidden" name="id" value={r.id} />
+                <button
+                  type="submit"
+                  style={{ ...menuBtn, color: "#d72c0d" }}
+                  onClick={(e) => {
+                    if (!confirm("Delete this request and all its matches? This cannot be undone — Archive hides it instead.")) e.preventDefault();
+                  }}
+                >
+                  Delete
+                </button>
+              </Form>
+            </div>
+          </details>
         </div>
       </td>
     </tr>
   );
 }
+
+const menuBtn = {
+  display: "block",
+  width: "100%",
+  textAlign: "left",
+  background: "none",
+  border: "none",
+  cursor: "pointer",
+  fontSize: 13,
+  color: "#303030",
+  padding: "7px 10px",
+  borderRadius: 4,
+};
 
 const actionBtn = {
   background: "none",
@@ -650,37 +742,42 @@ export default function RequestsPage() {
   // loaded rows: the list is small and a round trip per chip would be slower
   // than the filter itself.
   const [filter, setFilter] = useState("all");
+  // Find a request someone half-remembers: customer, phone, or the item.
+  const [search, setSearch] = useState("");
   const submitting = nav.state === "submitting";
 
   const FILTERS = {
     all: () => true,
-    nonItem: (r) => {
-      const k = r.requestKind || "item";
-      return k !== "item" && k !== "vague";
-    },
-    needsDetail: (r) => (r.requestKind || "item") === "vague",
-    website: (r) => r.source === "customer",
-    needsCall: (r) => r.source === "customer" && !r.calledAt,
-    noMatches: (r) => r._count.matches === 0 && r.matchState === "ok",
+    callbacks: (r) => r.work.bucket === "callbacks",
+    review: (r) => r.work.bucket === "review",
+    waiting: (r) => r.work.bucket === "waiting",
+    appraiser: (r) => r.work.bucket === "appraiser",
+    office: (r) => r.work.bucket === "office",
     problems: (r) => r.matchState === "error",
   };
+  // Same chips, same order, every day — including the empty ones. A chip that
+  // comes and goes moves the others around under the cursor.
   const CHIPS = [
     ["all", "All", counts.all],
-    ["needsDetail", "Needs more detail", counts.needsDetail],
-    ["nonItem", "Not an item request", counts.nonItem],
-    ["needsCall", "Needs a call", counts.needsCall],
-    ["website", "From website", counts.website],
-    ["noMatches", "Nothing found yet", counts.noMatches],
+    ["callbacks", "Salesperson callbacks", counts.callbacks],
+    ["review", "Matches to review", counts.review],
+    ["waiting", "Waiting for inventory", counts.waiting],
+    ["appraiser", "With appraiser", counts.appraiser],
+    ["office", "Office enquiries", counts.office],
     ["problems", "Problems", counts.problems],
   ];
-  const visible = requests.filter(FILTERS[filter] || FILTERS.all);
+  const searching = search.trim().length > 0;
+  // A search looks across every list, whichever chip is selected.
+  const visible = searching
+    ? requests.filter((r) => matchesSearch(r, search))
+    : requests.filter(FILTERS[filter] || FILTERS.all);
   const EMPTY_TEXT = {
     all: "No active requests. Click \u201C+ New Request\u201D to get started.",
-    nonItem: "No service enquiries, questions or spam waiting.",
-    needsDetail: "Nothing waiting on more detail from a customer.",
-    needsCall: "Nobody is waiting on a callback.",
-    website: "No requests have come in from the website.",
-    noMatches: "Every request has found something.",
+    callbacks: "Nobody is waiting on a call from a salesperson.",
+    review: "No pieces waiting on a salesperson\u2019s decision.",
+    waiting: "Nothing is waiting on inventory.",
+    appraiser: "Nothing is with the appraiser. A request goes there once a salesperson has turned down every piece we suggested.",
+    office: "No service enquiries, questions or spam waiting.",
     problems: "Nothing is stuck \u2014 all matching ran cleanly.",
   };
 
@@ -844,18 +941,43 @@ export default function RequestsPage() {
         </s-section>
       )}
 
-      <s-section heading={`Active Requests (${visible.length})`}>
-        {/* Filter chips. A chip with nothing behind it is hidden rather than
-            shown greyed — an always-empty filter is noise on a busy screen. */}
+      <s-section
+        heading={searching ? `Search results (${visible.length})` : `Active Requests (${visible.length})`}
+      >
+        <div style={{ display: "flex", gap: 8, marginBottom: 12, alignItems: "center", flexWrap: "wrap" }}>
+          <label htmlFor="request-search" style={{ position: "absolute", left: -9999 }}>
+            Find a request
+          </label>
+          <input
+            id="request-search"
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Find a request — customer name, phone, email, or the item (e.g. white gold chain)"
+            style={{ ...inputStyle, flex: 1, minWidth: 280 }}
+          />
+          {searching && (
+            <button type="button" onClick={() => setSearch("")} style={{ ...actionBtn, border: "1px solid #c9cccf", padding: "7px 12px" }}>
+              Clear
+            </button>
+          )}
+          <Link to="/app/history?all=1" style={{ fontSize: 12, color: "#005bd3", textDecoration: "none" }}>
+            Sold or archived? Search History
+          </Link>
+        </div>
+        {/* Filter chips: one per kind of work, always in the same place. */}
         <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
-          {CHIPS.filter(([key, , n]) => key === "all" || n > 0).map(([key, label, n]) => {
-            const on = filter === key;
-            const urgent = key === "problems" || key === "needsCall";
+          {CHIPS.map(([key, label, n]) => {
+            const on = !searching && filter === key;
+            const urgent = key === "problems" || key === "callbacks";
             return (
               <button
                 key={key}
                 type="button"
-                onClick={() => setFilter(key)}
+                onClick={() => {
+                  setSearch("");
+                  setFilter(key);
+                }}
                 style={{
                   border: `1px solid ${on ? (urgent ? "#a85100" : "#005bd3") : "#c9cccf"}`,
                   background: on ? (urgent ? "#fff5ea" : "#f1f8ff") : "#fff",
@@ -874,14 +996,16 @@ export default function RequestsPage() {
         </div>
         {visible.length === 0 ? (
           <p style={{ color: "#6d7175", textAlign: "center", padding: "40px 0", margin: 0 }}>
-            {EMPTY_TEXT[filter] || EMPTY_TEXT.all}
+            {searching
+              ? "No open request matches that. Try fewer words \u2014 a last name, or one word for the item."
+              : EMPTY_TEXT[filter] || EMPTY_TEXT.all}
           </p>
         ) : (
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
               <thead>
                 <tr style={{ background: "#f6f6f7", textAlign: "left" }}>
-                  {["Customer", "Salesperson", "Budget", "Matches", "Actions"].map(
+                  {["Looking for", "Customer", "Salesperson", "Next step", ""].map(
                     (h) => (
                       <th
                         key={h}
@@ -892,7 +1016,7 @@ export default function RequestsPage() {
                           textTransform: "uppercase",
                           letterSpacing: "0.5px",
                           color: "#6d7175",
-                          textAlign: h === "Matches" ? "center" : "left",
+                          textAlign: "left",
                         }}
                       >
                         {h}

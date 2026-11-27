@@ -91,9 +91,10 @@ export default function GuidePage() {
           because a customer wrote them, not you.
         </P>
         <P>
-          <B>Call them, then tap &ldquo;I called them.&rdquo;</B> The tag turns green and
-          says <Tag tone="ok">Called</Tag>, so nobody rings the same person twice and
-          nobody assumes someone else already did.
+          <B>Call them, then tap what happened.</B> <B>Spoke to customer</B> clears the
+          tag, so nobody rings the same person twice. <B>Left a message</B> or{" "}
+          <B>Call tomorrow</B> takes it off your list for today and puts it back at the
+          top tomorrow, so a voicemail is never mistaken for a conversation.
         </P>
         <P>
           While you have them on the phone, fix the wording of the request to what they
@@ -104,16 +105,24 @@ export default function GuidePage() {
 
       <s-section heading="When the app finds something">
         <P>
-          You&apos;ll see the request move into <B>New matches</B>. Open it and look at
-          the pieces it found.
+          The request appears in your <B>Do next</B> list as &quot;Review new matches&quot;.
+          Open it and look at the pieces it found.
         </P>
-        <Bullet>If one is right, call the customer.</Bullet>
         <Bullet>
-          If a piece is wrong, decline it. That teaches the app and stops it showing you
-          the same wrong thing again.
+          If one is right, tap <B>Keep to show</B>, then call the customer.
         </Bullet>
         <Bullet>
-          Declining is not rude and nothing is lost — it only affects what you get shown.
+          If a piece is wrong, tap <B>Not a fit</B>. That stops it showing you the same
+          wrong thing again. Tapped the wrong one? <B>Undo</B> puts it back.
+        </Bullet>
+        <Bullet>
+          If <B>none</B> of the pieces are right and the customer wants an estate piece
+          with no designer name, the appraiser sees the request and checks the estate
+          stock that has not been put out yet. If they find something, it comes back to
+          you to look at before anyone appraises it.
+        </Bullet>
+        <Bullet>
+          Saying not a fit is not rude and nothing is lost — it only affects what you get shown.
         </Bullet>
       </s-section>
 
@@ -131,7 +140,7 @@ export default function GuidePage() {
 
       <s-section heading="After the sale">
         <P>
-          Tap <B>Fulfill</B> when they buy. It leaves your working list but is not
+          Tap <B>Mark sold</B> when they buy. It leaves your working list but is not
           deleted — it moves to <B>Sold</B>, so you can still look up what someone bought
           last time.
         </P>
@@ -170,9 +179,10 @@ export default function GuidePage() {
           how fussy matching should be, and when new stock is checked.
         </P>
         <P>
-          <B>Appraiser</B> lists requests for pieces with no designer name, with the
-          ones nothing was found for at the top — the demand worth appraising against
-          first.
+          <B>Appraiser</B> lists customers who want a piece with no designer name and
+          whose salesperson turned down everything we suggested. The appraiser checks
+          the estate backlog for a fit and suggests it; nothing is appraised until the
+          salesperson says yes.
         </P>
         <P>
           The <B>Problems</B> filter on the Requests page shows anything that failed to

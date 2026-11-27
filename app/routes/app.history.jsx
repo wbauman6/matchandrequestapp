@@ -1,7 +1,9 @@
+import { useState } from "react";
 import { useLoaderData, Form } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
+import { matchesSearch } from "../lib/nextAction.js";
 
 // Requests older than this drop out of the default History view. HIDDEN, never
 // deleted: this is the record of what a customer asked for and what was sold
@@ -57,7 +59,11 @@ const STATUS_STYLE = {
 };
 
 export default function HistoryPage() {
-  const { requests, showAll, olderCount, months } = useLoaderData();
+  const { requests: allRequests, showAll, olderCount, months } = useLoaderData();
+  // "What did she buy last time?" — find a closed request by customer or item.
+  const [search, setSearch] = useState("");
+  const searching = search.trim().length > 0;
+  const requests = searching ? allRequests.filter((r) => matchesSearch(r, search)) : allRequests;
 
   return (
     <s-page heading="History">
@@ -68,6 +74,34 @@ export default function HistoryPage() {
             : `${requests.length} closed requests (last ${months} months)`
         }
       >
+        <div style={{ marginBottom: 12 }}>
+          <label htmlFor="history-search" style={{ position: "absolute", left: -9999 }}>
+            Find a closed request
+          </label>
+          <input
+            id="history-search"
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Find a closed request — customer name, phone, email, or the item"
+            style={{
+              width: "100%",
+              padding: "8px 12px",
+              border: "1px solid #c9cccf",
+              borderRadius: 6,
+              fontSize: 14,
+              boxSizing: "border-box",
+            }}
+          />
+          {searching && !showAll && olderCount > 0 && (
+            <div style={{ fontSize: 12, color: "#6d7175", marginTop: 6 }}>
+              Searching the last {months} months.{" "}
+              <a href="/app/history?all=1" style={{ color: "#005bd3" }}>
+                Search everything
+              </a>
+            </div>
+          )}
+        </div>
         {/* Older requests are hidden, never deleted — this is the record of
             what a customer asked for and what was sold to them. */}
         {(olderCount > 0 || showAll) && (
@@ -92,7 +126,9 @@ export default function HistoryPage() {
         )}
         {requests.length === 0 ? (
           <p style={{ color: "#6d7175", textAlign: "center", padding: "40px 0", margin: 0 }}>
-            {olderCount > 0
+            {searching
+              ? "No closed request matches that. Try fewer words."
+              : olderCount > 0
               ? `Nothing closed in the last ${months} months. ${olderCount} older request${olderCount === 1 ? "" : "s"} are hidden.`
               : "No fulfilled or archived requests yet."}
           </p>
@@ -127,6 +163,11 @@ export default function HistoryPage() {
                     <tr key={r.id} style={{ borderBottom: "1px solid #e1e3e5", opacity: 0.85 }}>
                       <td style={{ padding: "12px 16px", fontWeight: 600 }}>
                         {r.customerName}
+                        {r.description && (
+                          <div style={{ fontSize: 13, color: "#303030", fontWeight: 400 }}>
+                            {r.description}
+                          </div>
+                        )}
                         {r.customerEmail && (
                           <div style={{ fontSize: 12, color: "#6d7175", fontWeight: 400 }}>
                             {r.customerEmail}

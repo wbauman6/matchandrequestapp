@@ -77,10 +77,10 @@ test("save confirmation states the outcome in plain language", () => {
   const notice = (n) =>
     n > 0
       ? `Saved — ${n} match${n === 1 ? "" : "es"} found.`
-      : "Saved — nothing in stock yet. We'll keep watching.";
+      : "Saved — no match found yet. We'll keep watching.";
   assert.equal(notice(83), "Saved — 83 matches found.");
   assert.equal(notice(1), "Saved — 1 match found.");
-  assert.equal(notice(0), "Saved — nothing in stock yet. We'll keep watching.");
+  assert.equal(notice(0), "Saved — no match found yet. We'll keep watching.");
 });
 
 test("REGRESSION: an empty description is refused before any network call", () => {
