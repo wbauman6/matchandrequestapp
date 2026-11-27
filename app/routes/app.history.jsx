@@ -101,7 +101,7 @@ export default function HistoryPage() {
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
               <thead>
                 <tr style={{ background: "#f6f6f7", textAlign: "left" }}>
-                  {["Customer", "Salesperson", "Status", "Keywords", "Matches", "Closed", "Actions"].map(
+                  {["Customer", "Salesperson", "Status", "Matches", "Closed", "Actions"].map(
                     (h) => (
                       <th
                         key={h}
@@ -151,11 +151,7 @@ export default function HistoryPage() {
                           {r.status}
                         </span>
                       </td>
-                      <td style={{ padding: "12px 16px", fontSize: 12, color: "#6d7175" }}>
-                        {r.keywords.slice(0, 3).join(", ")}
-                        {r.keywords.length > 3 && " …"}
-                      </td>
-                      <td style={{ padding: "12px 16px", textAlign: "center", color: "#6d7175" }}>
+                                            <td style={{ padding: "12px 16px", textAlign: "center", color: "#6d7175" }}>
                         {r._count.matches || "—"}
                       </td>
                       <td style={{ padding: "12px 16px", fontSize: 12, color: "#8c9196" }}>

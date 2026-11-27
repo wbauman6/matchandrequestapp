@@ -148,11 +148,6 @@ export const action = async ({ request, params }) => {
   return null;
 };
 
-const PRIORITY_COLOR = {
-  urgent: "#d72c0d",
-  normal: "#616161",
-};
-
 function scoreColor(score) {
   if (score >= 70) return { bg: "#e3f1df", color: "#1a7a4a" };
   if (score >= 40) return { bg: "#fff5e6", color: "#a85100" };
@@ -577,7 +572,7 @@ export default function RequestDetailPage() {
             display: "grid",
             gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
             gap: 20,
-            marginBottom: req.description || req.keywords.length > 0 ? 20 : 0,
+            marginBottom: req.description ? 20 : 0,
           }}
         >
           <DetailField label="Customer" value={req.customerName} />
@@ -589,22 +584,6 @@ export default function RequestDetailPage() {
           <DetailField
             label="Budget"
             value={totalBudget != null ? `$${totalBudget.toLocaleString()}` : "—"}
-          />
-          <DetailField
-            label="Priority"
-            value={
-              <span
-                style={{
-                  fontSize: 11,
-                  fontWeight: 700,
-                  textTransform: "uppercase",
-                  letterSpacing: "0.5px",
-                  color: PRIORITY_COLOR[req.priority] || "#616161",
-                }}
-              >
-                {req.priority}
-              </span>
-            }
           />
           <DetailField
             label="Status"
@@ -636,39 +615,6 @@ export default function RequestDetailPage() {
           </div>
         )}
 
-        {req.keywords.length > 0 && (
-          <div>
-            <div
-              style={{
-                fontSize: 11,
-                fontWeight: 600,
-                textTransform: "uppercase",
-                letterSpacing: "0.5px",
-                color: "#6d7175",
-                marginBottom: 6,
-              }}
-            >
-              Keywords
-            </div>
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-              {req.keywords.map((kw) => (
-                <span
-                  key={kw}
-                  style={{
-                    fontSize: 12,
-                    padding: "3px 10px",
-                    borderRadius: 12,
-                    background: "#f6f6f7",
-                    color: "#414547",
-                    fontWeight: 500,
-                  }}
-                >
-                  {kw}
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
 
         <div style={{ marginTop: 20, display: "flex", gap: 8, flexWrap: "wrap" }}>
           {req.status !== "fulfilled" && (

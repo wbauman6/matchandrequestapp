@@ -131,11 +131,6 @@ export const action = async ({ request }) => {
   return null;
 };
 
-const PRIORITY_COLOR = {
-  urgent: "#d72c0d",
-  normal: "#616161",
-};
-
 function RequestRow({ r, salespeople = [] }) {
   return (
     <tr style={{ borderBottom: "1px solid #e1e3e5" }}>
@@ -250,23 +245,6 @@ function RequestRow({ r, salespeople = [] }) {
       </td>
       <td style={{ padding: "12px 16px", fontSize: 13, color: "#212326" }}>
         {r.budget != null ? `$${r.budget.toLocaleString()}` : <span style={{ color: "#c9cccf" }}>—</span>}
-      </td>
-      <td style={{ padding: "12px 16px" }}>
-        <span
-          style={{
-            fontSize: 11,
-            fontWeight: 600,
-            textTransform: "uppercase",
-            letterSpacing: "0.5px",
-            color: PRIORITY_COLOR[r.priority] || "#616161",
-          }}
-        >
-          {r.priority}
-        </span>
-      </td>
-      <td style={{ padding: "12px 16px", fontSize: 12, color: "#6d7175", maxWidth: 200 }}>
-        {r.keywords.slice(0, 4).join(", ")}
-        {r.keywords.length > 4 && " …"}
       </td>
       <td style={{ padding: "12px 16px", textAlign: "center" }}>
         {r._count.matches > 0 ? (
@@ -588,101 +566,6 @@ function CustomerSection({ inputStyle, labelStyle }) {
 }
 
 /** Chip/pill tag input. Press Enter or comma to add; Backspace removes last. */
-function TagInput({ tags, onChange }) {
-  const [inputVal, setInputVal] = useState("");
-
-  const commit = (raw) => {
-    const cleaned = raw.trim().toLowerCase().replace(/,/g, "");
-    if (cleaned && !tags.includes(cleaned)) onChange([...tags, cleaned]);
-    setInputVal("");
-  };
-
-  const remove = (tag) => onChange(tags.filter((t) => t !== tag));
-
-  const handleKeyDown = (e) => {
-    if (e.key === "Enter" || e.key === ",") {
-      e.preventDefault();
-      commit(inputVal);
-    } else if (e.key === "Backspace" && inputVal === "" && tags.length > 0) {
-      remove(tags[tags.length - 1]);
-    }
-  };
-
-  const handleBlur = () => {
-    if (inputVal.trim()) commit(inputVal);
-  };
-
-  return (
-    <div
-      onClick={(e) => e.currentTarget.querySelector("input")?.focus()}
-      style={{
-        display: "flex",
-        flexWrap: "wrap",
-        gap: 6,
-        padding: "6px 10px",
-        border: "1px solid #c9cccf",
-        borderRadius: 6,
-        minHeight: 40,
-        alignItems: "center",
-        cursor: "text",
-        background: "#fff",
-      }}
-    >
-      {tags.map((tag) => (
-        <span
-          key={tag}
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 5,
-            background: "#f1f2f3",
-            borderRadius: 20,
-            padding: "3px 10px 3px 12px",
-            fontSize: 13,
-            color: "#212326",
-          }}
-        >
-          {tag}
-          <button
-            type="button"
-            onClick={(e) => { e.stopPropagation(); remove(tag); }}
-            style={{
-              background: "none",
-              border: "none",
-              cursor: "pointer",
-              padding: 0,
-              lineHeight: 1,
-              color: "#6d7175",
-              fontSize: 15,
-              display: "flex",
-              alignItems: "center",
-            }}
-            aria-label={`Remove ${tag}`}
-          >
-            ×
-          </button>
-        </span>
-      ))}
-      <input
-        value={inputVal}
-        onChange={(e) => setInputVal(e.target.value)}
-        onKeyDown={handleKeyDown}
-        onBlur={handleBlur}
-        placeholder={tags.length === 0 ? "Type a keyword and press Enter…" : ""}
-        style={{
-          border: "none",
-          outline: "none",
-          fontSize: 14,
-          flex: 1,
-          minWidth: 120,
-          background: "transparent",
-          padding: "2px 0",
-        }}
-      />
-    </div>
-  );
-}
-
 const REJECTION_LABEL = {
   honeypot: "Bot trap tripped",
   validation: "Incomplete or junk",
@@ -932,13 +815,6 @@ export default function RequestsPage() {
                   placeholder="2500"
                 />
               </div>
-              <div>
-                <label style={labelStyle}>Priority</label>
-                <select name="priority" defaultValue="normal" style={inputStyle}>
-                  <option value="normal">Normal</option>
-                  <option value="urgent">Urgent</option>
-                </select>
-              </div>
               <div style={{ paddingTop: 20, display: "flex", alignItems: "center", gap: 8 }}>
                 <input type="checkbox" name="pinned" id="pinned-check" />
                 <label htmlFor="pinned-check" style={{ fontSize: 13, cursor: "pointer" }}>
@@ -1005,7 +881,7 @@ export default function RequestsPage() {
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
               <thead>
                 <tr style={{ background: "#f6f6f7", textAlign: "left" }}>
-                  {["Customer", "Salesperson", "Budget", "Priority", "Keywords", "Matches", "Actions"].map(
+                  {["Customer", "Salesperson", "Budget", "Matches", "Actions"].map(
                     (h) => (
                       <th
                         key={h}
