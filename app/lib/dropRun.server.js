@@ -151,7 +151,12 @@ async function runWeeklyDropInner(shop, { force, run, since, startedAt }) {
 
     // 2+3+4) DRAIN — embed (retry) + evaluate every queued product against every
     // active request, recording eval status per pair.
-    const drained = await drainProductQueue(shop, { force });
+    // A drop that has started must finish. The soft daily cap exists to stop
+    // routine churn, not to abandon a run halfway: stopping at call 500 of 600
+    // leaves the catalogue half-judged, nothing retries the remainder, and a
+    // customer's piece sits unmatched until next week. The hard ceiling in
+    // aiBudget.server.js is still enforced.
+    const drained = await drainProductQueue(shop, { force, critical: true });
     audit.embedFailures = drained.embedFailures;
     audit.evalsAttempted = drained.evalsAttempted;
     audit.evalsCompleted = drained.evalsCompleted;

@@ -221,11 +221,17 @@ async function runMatchesInner(request, reqVec) {
   }));
   // Reasoning pass proposes matches (1 Sonnet call). Budget is NOT passed — it's
   // a soft ranking factor handled here, never an AI gate.
+  // CRITICAL: this path runs for a request someone just submitted or edited.
+  // Refusing it because routine churn used up the day's cap means a real
+  // customer gets nothing, which is the opposite of what the cap is for. It
+  // may pass the soft cap; the hard ceiling still applies.
   let matches = await reasonMatches({
     description: reasoningText,
     notes: notesText,
     budget: null,
     candidates,
+    critical: true,
+    reason: `live request ${request.id}`,
   });
 
   // Batched double-check: ONE Sonnet call re-verifies ALL proposed matches with
@@ -236,6 +242,10 @@ async function runMatchesInner(request, reqVec) {
       description: reasoningText,
       notes: notesText,
       candidates: matches.map((m) => cById.get(m.productId)).filter(Boolean),
+      // Same run — stopping between propose and verify would leave unverified
+      // matches on screen, which is worse than either finishing or not starting.
+      critical: true,
+      reason: `live request ${request.id} (verify)`,
     });
     matches = matches.filter((m) => pass.has(m.productId));
   }

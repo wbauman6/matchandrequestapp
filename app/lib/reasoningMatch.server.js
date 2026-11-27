@@ -153,7 +153,7 @@ function parseItemList(raw, key) {
  * can record an error state (and never mistake a transient failure for "0 in
  * stock"). Returns [] only when there's no client/candidates (a real empty).
  */
-export async function reasonMatches({ description, notes, budget, candidates }) {
+export async function reasonMatches({ description, notes, budget, candidates, critical = false, reason = "" }) {
   const c = getClient();
   if (!c || !candidates?.length) return [];
 
@@ -181,7 +181,9 @@ Return the JSON verdict now.`;
 
   const parsed = await withRetry(
     async (attempt) => {
-      await trackAiCall(); // daily cost kill switch — throws when over budget
+      // Critical work (in-flight drop, live customer request) may pass the
+      // soft cap; the hard ceiling still stops it. See aiBudget.server.js.
+      await trackAiCall({ critical, reason });
       const resp = await c.messages.create({
         model: MODEL,
         max_tokens: 8000,
@@ -246,7 +248,7 @@ const VERIFY_CHUNK = 25;
  * of productIds that PASS. On failure returns all ids (don't drop on transient
  * error) — except a budget kill switch, which propagates.
  */
-export async function verifyBatch({ description, notes, candidates }) {
+export async function verifyBatch({ description, notes, candidates, critical = false, reason = "" }) {
   const c = getClient();
   const allIds = new Set((candidates || []).map((p) => p.productId));
   if (!c || !candidates?.length) return allIds;
@@ -278,7 +280,9 @@ Return a verdict for every product id. Return the JSON now.`;
   try {
     const parsed = await withRetry(
       async (attempt) => {
-        await trackAiCall(); // daily cost kill switch — throws when over budget
+        // Critical work (in-flight drop, live customer request) may pass the
+      // soft cap; the hard ceiling still stops it. See aiBudget.server.js.
+      await trackAiCall({ critical, reason });
         const resp = await c.messages.create({
           model: VERIFY_MODEL,
           max_tokens: 8000, // room for a verdict per candidate up to the retrieval ceiling

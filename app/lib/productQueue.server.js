@@ -316,7 +316,16 @@ export async function prewarmEmbeddings(shop, { timeBudgetMs = 60_000, limit = 4
  * and is judged once during the next drop window. Pass { force: true }
  * (manual /api/drain-queue?force=1 only) to override.
  */
-export async function drainProductQueue(shop, { force = false } = {}) {
+/**
+ * @param {object} [opts]
+ * @param {boolean} [opts.force]    ignore the weekly drop window
+ * @param {boolean} [opts.critical] this is an in-flight drop that must finish.
+ *   Its AI calls may pass the soft daily cap (the hard ceiling still applies),
+ *   because stopping at call 500 of 600 leaves the catalogue half-judged and
+ *   nothing retries the remainder — a customer's piece then sits unmatched for
+ *   a week to save a few cents.
+ */
+export async function drainProductQueue(shop, { force = false, critical = false } = {}) {
   const stats = {
     processed: 0,
     matched: 0,
@@ -425,6 +434,8 @@ export async function drainProductQueue(shop, { force = false } = {}) {
               notes: notesText,
               budget: null, // budget is a soft ranking factor, never an AI gate
               candidates: chunk,
+              critical,
+              reason: `drop drain ${shop}`,
             });
             if (matches.length > 0) {
               const cById = new Map(chunk.map((c) => [c.productId, c]));
@@ -432,6 +443,8 @@ export async function drainProductQueue(shop, { force = false } = {}) {
                 description: reasoningText,
                 notes: notesText,
                 candidates: matches.map((m) => cById.get(m.productId)).filter(Boolean),
+                critical,
+                reason: `drop drain ${shop} (verify)`,
               });
               matches = matches.filter((m) => pass.has(m.productId));
             }
