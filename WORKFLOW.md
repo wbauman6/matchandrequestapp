@@ -33,20 +33,54 @@ deploy to the live store by accident.
 1. **Never run `shopify app deploy` from the fork.** It would push extensions
    to the real POS iPads. The fork's config is disarmed to prevent this; do
    not re-arm it.
-2. **Check `DATABASE_URL` before any migration.** The two copies must never
+2. **`CRON_SECRET` must be set in Vercel, and you must REDEPLOY after setting
+   it.** Environment variables only reach the running code on a new build —
+   saving the variable alone changes nothing, and the symptom is identical to
+   not setting it at all (every scheduled endpoint 401s).
+
+   The scheduled endpoints fail CLOSED by design: with no secret configured,
+   `/api/digest`, `/api/weekly-drop` and `/api/drain-queue` all return 401 and
+   the crons stop. That is deliberate — see `app/lib/cronAuth.js`. These URLs
+   are public and one of them emails every salesperson.
+
+   Do **not** use the template default `change-me-to-a-random-string`. It
+   appears in thousands of public repos and is in every scanner's wordlist.
+   Generate a real one:
+   ```bash
+   node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
+   ```
+   The same value goes in `.env` and in Vercel.
+
+   Verify from outside after redeploying — anonymous must be 401, the real
+   secret must be 200:
+   ```bash
+   SECRET=$(grep '^CRON_SECRET=' .env | cut -d= -f2-)
+   curl -s -o /dev/null -w '%{http_code}\n' https://matchandrequestapp2.vercel.app/api/weekly-drop
+   curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $SECRET" https://matchandrequestapp2.vercel.app/api/weekly-drop
+   ```
+3. **Never append to `.env` with `echo >>`.** The file does not always end in
+   a newline, so the appended line fuses onto the previous value and silently
+   invalidates a credential. Read the file, ensure a trailing newline, write it
+   back. If a key suddenly 401s right after you edited `.env`, check for two
+   assignments on one line before blaming the provider.
+4. **Check `DATABASE_URL` before any migration.** The two copies must never
    share a database. `node scripts/verify-dev-db.mjs` (in the fork) refuses to
    run if it is pointed at production.
-3. **`prisma migrate dev` does not work here.** This database's migration
+5. **`prisma migrate dev` does not work here.** This database's migration
    history is drifted and Prisma will demand a destructive reset. Write an
    additive, idempotent `.sql` file and apply it with:
    ```bash
    node scripts/apply-sql.mjs prisma/migrations/<name>/migration.sql
    ```
-4. **Run `node scripts/patch-prisma.cjs` after every `prisma generate`.**
+6. **Run `node scripts/patch-prisma.cjs` after every `prisma generate`.**
    This machine is Windows ARM64 and there is no native Prisma engine; without
    the patch you get `wasm module undefined`.
-5. **Schema first, then code.** Columns must exist in the database before the
+7. **Schema first, then code.** Columns must exist in the database before the
    code that reads them deploys, or the app throws on load.
+8. **Killing a background job does not kill what it spawned.** A `vite-node`
+   child survives its parent shell being killed and keeps running — holding
+   the drain lock and spending AI budget with nobody watching. Check with
+   `Get-CimInstance Win32_Process` and kill by PID.
 
 ## What ships where
 
